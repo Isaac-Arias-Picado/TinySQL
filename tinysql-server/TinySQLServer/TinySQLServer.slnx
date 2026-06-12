@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="TinySQLServer/TinySQLServer.vcxproj" Id="ae1426a6-fe22-4193-a9ff-2b78e15889b5" />
+</Solution>
