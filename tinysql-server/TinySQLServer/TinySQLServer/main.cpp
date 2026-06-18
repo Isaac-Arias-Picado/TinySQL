@@ -4,6 +4,7 @@
 #include "httplib.h"
 #include "json.hpp"
 #include "QueryProcessor.h"
+#include "SystemCatalog.h"
 using json = nlohmann::json;
 static json toJson(const QueryResult& r) {
     json j;

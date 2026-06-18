@@ -9,7 +9,12 @@ StoredDataManager::StoredDataManager() {
 void StoredDataManager::cargarBasesDeDatos() {
     if (!fs::exists(DATA_DIR)) fs::create_directory(DATA_DIR);
     for (const auto& entry : fs::directory_iterator(DATA_DIR)) {
-        if (entry.is_directory()) databases.insert(entry.path().filename().string());
+        if (entry.is_directory()) {
+            std::string name = entry.path().filename().string();
+            if (name != "SystemCatalog") {
+                databases.insert(name);
+            }
+        }
     }
     std::cout << "Bases de datos cargadas: ";
     for (const auto& db : databases) std::cout << db << " ";

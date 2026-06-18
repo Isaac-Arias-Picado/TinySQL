@@ -15,15 +15,21 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Types.h">
-      <Filter>Resource Files</Filter>
+    <ClInclude Include="SystemCatalog.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="StoredDataManager.h">
-      <Filter>Resource Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Types.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="StoredDataManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SystemCatalog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
