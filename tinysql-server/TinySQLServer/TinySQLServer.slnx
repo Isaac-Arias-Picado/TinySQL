@@ -3,5 +3,7 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Project Path="QueryProcessing/QueryProcessing.vcxproj" Id="81d26a31-4f9c-4aa3-beee-1da5f05689b2" />
+  <Project Path="StoredDataManager/StoredDataManager.vcxproj" Id="4f0b58a8-8818-4461-8de1-38dddae9cea3" />
   <Project Path="TinySQLServer/TinySQLServer.vcxproj" Id="ae1426a6-fe22-4193-a9ff-2b78e15889b5" />
 </Solution>
