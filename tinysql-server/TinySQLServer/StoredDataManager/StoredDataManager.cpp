@@ -73,3 +73,79 @@ QueryResult StoredDataManager::crearTabla(const std::string& dbName,
     r.message = "Table created";
     return r;
 }
+
+QueryResult StoredDataManager::insertarFila(const std::string& dbName,
+    const std::string& tableName,
+    const std::vector<std::string>& valores) {
+    QueryResult r;
+    if (dbName.empty()) { r.error = "No database selected"; return r; }
+    if (!databases.count(dbName)) { r.error = "Database does not exist"; return r; }
+
+    std::vector<Columna> columnas = leerColumnas(dbName, tableName);
+    if (columnas.empty()) { r.error = "Table does not exist"; return r; }
+
+    if (valores.size() != columnas.size()) {
+        r.error = "Column count does not match value count";
+        return r;
+    }
+
+    // Validaciones
+    for (size_t i = 0; i < columnas.size(); i++) {
+        const Columna& col = columnas[i];
+        const std::string& valor = valores[i];
+
+        if (col.type == TipoColumna::DATETIME) {
+            if (!esFechaValida(valor)) {
+                r.error = "Invalid datetime format: " + valor;
+                return r;
+            }
+        }
+    }
+
+    // Si todo se valida, se escribe
+    std::string rutaTabla = DATA_DIR + "/" + dbName + "/" + tableName;
+    std::ofstream file(rutaTabla, std::ios::binary | std::ios::app);
+    if (!file.is_open()) { r.error = "Cannot open table file"; return r; }
+
+    for (size_t i = 0; i < columnas.size(); i++) {
+        const Columna& col = columnas[i];
+        const std::string& valor = valores[i];
+
+        if (col.type == TipoColumna::INTEGER) {
+            int num = std::stoi(valor);
+            file.write(reinterpret_cast<char*>(&num), sizeof(int));
+        }
+        else if (col.type == TipoColumna::DOUBLE) {
+            double num = std::stod(valor);
+            file.write(reinterpret_cast<char*>(&num), sizeof(double));
+        }
+        else if (col.type == TipoColumna::VARCHAR) {
+            std::vector<char> buffer(col.size, 0);
+            for (int j = 0; j < (int)valor.size() && j < col.size; j++) {
+                buffer[j] = valor[j];
+            }
+            file.write(buffer.data(), col.size);
+        }
+        else if (col.type == TipoColumna::DATETIME) {
+            std::vector<char> buffer(19, 0);
+            for (int j = 0; j < (int)valor.size() && j < 19; j++) {
+                buffer[j] = valor[j];
+            }
+            file.write(buffer.data(), 19);
+        }
+    }
+
+    file.close();
+    r.success = true;
+    r.type = "dml";
+    r.message = "Row inserted";
+    return r;
+}
+
+bool StoredDataManager::esFechaValida(const std::string& fecha) {
+    // Debe tener formato YYYY-MM-DD HH:MM:SS (19 caracteres)
+    if (fecha.size() != 19) return false;
+    if (fecha[4] != '-' || fecha[7] != '-' || fecha[10] != ' ') return false;
+    if (fecha[13] != ':' || fecha[16] != ':') return false;
+    return true;
+}

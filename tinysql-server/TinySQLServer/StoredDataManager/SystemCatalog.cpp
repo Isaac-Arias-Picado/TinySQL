@@ -87,3 +87,41 @@ void escribirColumna(const std::string& dbName, const std::string& tableName,
 	file.write(reinterpret_cast<char*>(&orden), sizeof(int));
 	file.close();
 }
+
+std::vector<Columna> leerColumnas(const std::string& dbName, const std::string& tableName) {
+	std::vector<Columna> columnas;
+	const std::string ruta = "./data/SystemCatalog/SystemColumns";
+	std::ifstream file(ruta, std::ios::binary);
+	if (!file.is_open()) return columnas;
+
+	std::array<char, registrysize> bufBD{};
+	std::array<char, registrysize> bufTabla{};
+	std::array<char, registrysize> bufCol{};
+
+	while (file.read(bufBD.data(), bufBD.size())) {
+		file.read(bufTabla.data(), bufTabla.size());
+		file.read(bufCol.data(), bufCol.size());
+
+		int tipo, size, nullable, orden;
+		file.read(reinterpret_cast<char*>(&tipo), sizeof(int));
+		file.read(reinterpret_cast<char*>(&size), sizeof(int));
+		file.read(reinterpret_cast<char*>(&nullable), sizeof(int));
+		file.read(reinterpret_cast<char*>(&orden), sizeof(int));
+
+		std::string dbLeido(bufBD.data());
+		std::string tablaLeida(bufTabla.data());
+
+		// Solo nos quedamos con las columnas de la tabla que buscamos
+		if (dbLeido == dbName && tablaLeida == tableName) {
+			Columna col;
+			col.name = std::string(bufCol.data());
+			col.type = static_cast<TipoColumna>(tipo);
+			col.size = size;
+			col.nullable = (nullable == 1);
+			columnas.push_back(col);
+		}
+		bufBD.fill(0); bufTabla.fill(0); bufCol.fill(0);
+	}
+	file.close();
+	return columnas;
+}

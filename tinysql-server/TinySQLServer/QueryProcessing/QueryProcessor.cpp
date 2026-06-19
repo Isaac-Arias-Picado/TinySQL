@@ -31,6 +31,11 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
 
         r = storage.crearTabla(dbContext, nombreTabla, columnas);
     }
+    else if (cmd.rfind("INSERT", 0) == 0) {
+        std::string tabla = extraerNombreTablaInsert(sql);
+        std::vector<std::string> valores = extraerValores(sql);
+        r = storage.insertarFila(dbContext, tabla, valores);
+    }
     else if (cmd.rfind("SET DATABASE", 0) == 0) {
         std::string nombre = limpiarNombre(sql.substr(12));
         if (storage.existeBaseDatos(nombre)) {
@@ -125,4 +130,35 @@ Columna QueryProcessor::parsearColumna(const std::string& texto) {
     }
 
     return col;
+}
+
+// Saca el nombre entre "INTO" y "VALUES"
+std::string QueryProcessor::extraerNombreTablaInsert(const std::string& sql) {
+    size_t inicioInto = sql.find("INTO");
+    if (inicioInto == std::string::npos) return "";
+    size_t inicioNombre = inicioInto + 4;
+    size_t finNombre = sql.find("VALUES", inicioNombre);
+    if (finNombre == std::string::npos) finNombre = sql.find("(", inicioNombre);
+    if (finNombre == std::string::npos) return "";
+    return limpiarNombre(sql.substr(inicioNombre, finNombre - inicioNombre));
+}
+
+// Saca los valores entre parentesis y los separa por comas
+std::vector<std::string> QueryProcessor::extraerValores(const std::string& sql) {
+    std::vector<std::string> valores;
+    size_t inicio = sql.find("(");
+    size_t fin = sql.rfind(")");
+    if (inicio == std::string::npos || fin == std::string::npos) return valores;
+
+    std::string bloque = sql.substr(inicio + 1, fin - inicio - 1);
+    std::vector<std::string> crudos = partirPorComas(bloque);
+
+    for (auto& v : crudos) {
+        std::string limpio = limpiarNombre(v);
+        // quitar comillas dobles al inicio y final
+        if (!limpio.empty() && limpio.front() == '"') limpio.erase(0, 1);
+        if (!limpio.empty() && limpio.back() == '"') limpio.pop_back();
+        valores.push_back(limpio);
+    }
+    return valores;
 }

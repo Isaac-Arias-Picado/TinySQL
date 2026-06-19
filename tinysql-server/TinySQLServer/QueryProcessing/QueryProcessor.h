@@ -15,4 +15,6 @@ private:
     std::vector<std::string> partirPorComas(const std::string& bloque);
     TipoColumna parsearTipo(const std::string& tipoTexto);
     Columna parsearColumna(const std::string& texto);
+    std::string extraerNombreTablaInsert(const std::string& sql);
+    std::vector<std::string> extraerValores(const std::string& sql);
 };
