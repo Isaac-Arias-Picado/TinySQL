@@ -51,3 +51,39 @@ std::vector<std::string> leerBasesDatos() {
 	file.close();
 	return nombres;
 }
+
+void escribirTabla(const std::string& dbName, const std::string& tableName) {
+	std::filesystem::create_directories("./data/SystemCatalog");
+	std::array<char, registrysize> bufBD = aRegistroFijo(dbName);
+	std::array<char, registrysize> bufTabla = aRegistroFijo(tableName);
+	const std::string ruta = "./data/SystemCatalog/SystemTables";
+	std::ofstream file(ruta, std::ios::binary | std::ios::app);
+	if (!file.is_open()) return;
+	file.write(bufBD.data(), bufBD.size());
+	file.write(bufTabla.data(), bufTabla.size());
+	file.close();
+}
+
+void escribirColumna(const std::string& dbName, const std::string& tableName,
+	const Columna& col, int orden) {
+	std::filesystem::create_directories("./data/SystemCatalog");
+	const std::string ruta = "./data/SystemCatalog/SystemColumns";
+	std::ofstream file(ruta, std::ios::binary | std::ios::app);
+	if (!file.is_open()) return;
+
+	std::array<char, registrysize> bufBD = aRegistroFijo(dbName);
+	std::array<char, registrysize> bufTabla = aRegistroFijo(tableName);
+	std::array<char, registrysize> bufCol = aRegistroFijo(col.name);
+	file.write(bufBD.data(), bufBD.size());
+	file.write(bufTabla.data(), bufTabla.size());
+	file.write(bufCol.data(), bufCol.size());
+
+	int tipo = static_cast<int>(col.type);   // el enum a int
+	int size = col.size;
+	int nullable = col.nullable ? 1 : 0;      // bool a int
+	file.write(reinterpret_cast<char*>(&tipo), sizeof(int));
+	file.write(reinterpret_cast<char*>(&size), sizeof(int));
+	file.write(reinterpret_cast<char*>(&nullable), sizeof(int));
+	file.write(reinterpret_cast<char*>(&orden), sizeof(int));
+	file.close();
+}

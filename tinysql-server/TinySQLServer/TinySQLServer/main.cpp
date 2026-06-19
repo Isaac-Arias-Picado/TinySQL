@@ -5,6 +5,7 @@
 #include "json.hpp"
 #include "QueryProcessor.h"
 #include "SystemCatalog.h"
+
 using json = nlohmann::json;
 static json toJson(const QueryResult& r) {
     json j;
@@ -18,6 +19,7 @@ static json toJson(const QueryResult& r) {
     else { j["error"] = r.error; }
     return j;
 }
+
 int main() {
     QueryProcessor processor;
     httplib::Server svr;

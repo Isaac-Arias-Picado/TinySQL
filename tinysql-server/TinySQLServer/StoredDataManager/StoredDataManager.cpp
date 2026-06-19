@@ -1,6 +1,9 @@
 #include "StoredDataManager.h"
 #include <filesystem>
 #include <iostream>
+#include <fstream>
+#include "SystemCatalog.h"
+
 namespace fs = std::filesystem;
 static const std::string DATA_DIR = "./data";
 StoredDataManager::StoredDataManager() {
@@ -28,6 +31,7 @@ QueryResult StoredDataManager::crearBaseDatos(const std::string& nombre) {
     if (databases.count(nombre)) { r.error = "Database already exists"; return r; }
     fs::create_directory(DATA_DIR + "/" + nombre);
     databases.insert(nombre);
+    escribirBaseDatos(nombre);
     r.success = true; r.type = "ddl"; r.message = "Database created"; return r;
 }
 QueryResult StoredDataManager::eliminarBaseDatos(const std::string& nombre) {
@@ -36,4 +40,36 @@ QueryResult StoredDataManager::eliminarBaseDatos(const std::string& nombre) {
     fs::remove_all(DATA_DIR + "/" + nombre);
     databases.erase(nombre);
     r.success = true; r.type = "ddl"; r.message = "Database dropped"; return r;
+}
+
+QueryResult StoredDataManager::crearTabla(const std::string& dbName,
+    const std::string& tableName,
+    const std::vector<Columna>& columnas) {
+    QueryResult r;
+
+    // Se valida que se le hizo el SET a la base de datos
+    if (dbName.empty()) {
+        r.error = "No se selecciono ninguna base de datos";
+        return r;
+    }
+    // Se confirma que la base de datos exista
+    if (!databases.count(dbName)) {
+        r.error = "Base de datos no existe";
+        return r;
+    }
+    // Se crear el archivo binario 
+    std::string rutaTabla = DATA_DIR + "/" + dbName + "/" + tableName;
+    std::ofstream file(rutaTabla, std::ios::binary | std::ios::app);
+    file.close();
+
+    // Se registra en el catalogo
+    escribirTabla(dbName, tableName);
+    for (int i = 0; i < (int)columnas.size(); i++) {
+        escribirColumna(dbName, tableName, columnas[i], i);
+    }
+
+    r.success = true;
+    r.type = "ddl";
+    r.message = "Table created";
+    return r;
 }

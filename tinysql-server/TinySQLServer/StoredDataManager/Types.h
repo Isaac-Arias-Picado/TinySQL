@@ -11,3 +11,17 @@ struct QueryResult {
     std::vector<std::string> columns;              
     std::vector<std::vector<std::string>> rows;   
 };
+
+enum class TipoColumna {
+    INTEGER,   
+    DOUBLE,    
+    VARCHAR,   
+    DATETIME   
+};
+
+struct Columna {
+    std::string name;      
+    TipoColumna type;     
+    int size;               
+    bool nullable;       
+};
