@@ -1,4 +1,5 @@
 #include "SystemCatalog.h"
+#include "Cifrado.h"
 #include <iostream>
 #include <array>
 #include <string>
@@ -31,6 +32,7 @@ void escribirBaseDatos(const std::string& dbName) {
 		std::cout << "Error: No existe aun el archivo SystemDataBase";
 		return;
 	}
+	encriptar(buffer.data(), (int)buffer.size());
 	file.write(buffer.data(), buffer.size());
 	file.close();
 }
@@ -44,6 +46,7 @@ std::vector<std::string> leerBasesDatos() {
 	}
 	std::array<char, registrysize> buffer{};
 	while (file.read(buffer.data(), buffer.size())) {
+		encriptar(buffer.data(), (int)buffer.size());
 		std::string nombre(buffer.data());  
 		nombres.push_back(nombre);
 		buffer.fill(0);  
@@ -54,13 +57,20 @@ std::vector<std::string> leerBasesDatos() {
 
 void escribirTabla(const std::string& dbName, const std::string& tableName) {
 	std::filesystem::create_directories("./data/SystemCatalog");
-	std::array<char, registrysize> bufBD = aRegistroFijo(dbName);
-	std::array<char, registrysize> bufTabla = aRegistroFijo(tableName);
 	const std::string ruta = "./data/SystemCatalog/SystemTables";
 	std::ofstream file(ruta, std::ios::binary | std::ios::app);
 	if (!file.is_open()) return;
-	file.write(bufBD.data(), bufBD.size());
-	file.write(bufTabla.data(), bufTabla.size());
+
+	const size_t recordSize = registrysize * 2;
+	std::vector<char> registro(recordSize, 0);
+
+	std::array<char, registrysize> bufBD = aRegistroFijo(dbName);
+	std::array<char, registrysize> bufTabla = aRegistroFijo(tableName);
+	std::memcpy(registro.data(), bufBD.data(), registrysize);
+	std::memcpy(registro.data() + registrysize, bufTabla.data(), registrysize);
+
+	encriptar(registro.data(), (int)recordSize);
+	file.write(registro.data(), recordSize);
 	file.close();
 }
 
@@ -71,20 +81,31 @@ void escribirColumna(const std::string& dbName, const std::string& tableName,
 	std::ofstream file(ruta, std::ios::binary | std::ios::app);
 	if (!file.is_open()) return;
 
+	// Tamano del registro: 3 nombres de 64 + 4 ints
+	const size_t recordSize = registrysize * 3 + sizeof(int) * 4;
+	std::vector<char> registro(recordSize, 0);
+	size_t pos = 0;
+
+	// Copiar los 3 nombres (cada uno como registro fijo de 64)
 	std::array<char, registrysize> bufBD = aRegistroFijo(dbName);
 	std::array<char, registrysize> bufTabla = aRegistroFijo(tableName);
 	std::array<char, registrysize> bufCol = aRegistroFijo(col.name);
-	file.write(bufBD.data(), bufBD.size());
-	file.write(bufTabla.data(), bufTabla.size());
-	file.write(bufCol.data(), bufCol.size());
+	std::memcpy(registro.data() + pos, bufBD.data(), registrysize); pos += registrysize;
+	std::memcpy(registro.data() + pos, bufTabla.data(), registrysize); pos += registrysize;
+	std::memcpy(registro.data() + pos, bufCol.data(), registrysize); pos += registrysize;
 
-	int tipo = static_cast<int>(col.type);   
+	// Copiar los 4 ints
+	int tipo = static_cast<int>(col.type);
 	int size = col.size;
-	int nullable = col.nullable ? 1 : 0;  
-	file.write(reinterpret_cast<char*>(&tipo), sizeof(int));
-	file.write(reinterpret_cast<char*>(&size), sizeof(int));
-	file.write(reinterpret_cast<char*>(&nullable), sizeof(int));
-	file.write(reinterpret_cast<char*>(&orden), sizeof(int));
+	int nullable = col.nullable ? 1 : 0;
+	std::memcpy(registro.data() + pos, &tipo, sizeof(int)); pos += sizeof(int);
+	std::memcpy(registro.data() + pos, &size, sizeof(int)); pos += sizeof(int);
+	std::memcpy(registro.data() + pos, &nullable, sizeof(int)); pos += sizeof(int);
+	std::memcpy(registro.data() + pos, &orden, sizeof(int)); pos += sizeof(int);
+
+	// Encriptar el registro completo y escribir
+	encriptar(registro.data(), (int)recordSize);
+	file.write(registro.data(), recordSize);
 	file.close();
 }
 
@@ -94,32 +115,32 @@ std::vector<Columna> leerColumnas(const std::string& dbName, const std::string& 
 	std::ifstream file(ruta, std::ios::binary);
 	if (!file.is_open()) return columnas;
 
-	std::array<char, registrysize> bufBD{};
-	std::array<char, registrysize> bufTabla{};
-	std::array<char, registrysize> bufCol{};
+	const size_t recordSize = registrysize * 3 + sizeof(int) * 4;
+	std::vector<char> registro(recordSize);
 
-	while (file.read(bufBD.data(), bufBD.size())) {
-		file.read(bufTabla.data(), bufTabla.size());
-		file.read(bufCol.data(), bufCol.size());
+	while (file.read(registro.data(), recordSize)) {
+		// Desencriptar el registro completo
+		encriptar(registro.data(), (int)recordSize);
+
+		size_t pos = 0;
+		std::string dbLeido(registro.data() + pos); pos += registrysize;
+		std::string tablaLeida(registro.data() + pos); pos += registrysize;
+		std::string colNombre(registro.data() + pos); pos += registrysize;
 
 		int tipo, size, nullable, orden;
-		file.read(reinterpret_cast<char*>(&tipo), sizeof(int));
-		file.read(reinterpret_cast<char*>(&size), sizeof(int));
-		file.read(reinterpret_cast<char*>(&nullable), sizeof(int));
-		file.read(reinterpret_cast<char*>(&orden), sizeof(int));
-
-		std::string dbLeido(bufBD.data());
-		std::string tablaLeida(bufTabla.data());
+		std::memcpy(&tipo, registro.data() + pos, sizeof(int)); pos += sizeof(int);
+		std::memcpy(&size, registro.data() + pos, sizeof(int)); pos += sizeof(int);
+		std::memcpy(&nullable, registro.data() + pos, sizeof(int)); pos += sizeof(int);
+		std::memcpy(&orden, registro.data() + pos, sizeof(int)); pos += sizeof(int);
 
 		if (dbLeido == dbName && tablaLeida == tableName) {
 			Columna col;
-			col.name = std::string(bufCol.data());
+			col.name = colNombre;
 			col.type = static_cast<TipoColumna>(tipo);
 			col.size = size;
 			col.nullable = (nullable == 1);
 			columnas.push_back(col);
 		}
-		bufBD.fill(0); bufTabla.fill(0); bufCol.fill(0);
 	}
 	file.close();
 	return columnas;
@@ -133,8 +154,12 @@ void reescribirArchivoFiltrado(const std::string& ruta, size_t recordSize, Predi
 	std::vector<std::vector<char>> registros;
 	std::vector<char> buffer(recordSize);
 	while (in.read(buffer.data(), recordSize)) {
-		if (!pred(buffer)) {
-			registros.push_back(buffer);  
+		// Copia desencriptada solo para comparar
+		std::vector<char> desencriptado = buffer;
+		encriptar(desencriptado.data(), (int)recordSize);
+
+		if (!pred(desencriptado)) {
+			registros.push_back(buffer);  // guardamos el ORIGINAL encriptado
 		}
 		buffer.assign(recordSize, 0);
 	}
@@ -142,7 +167,7 @@ void reescribirArchivoFiltrado(const std::string& ruta, size_t recordSize, Predi
 
 	std::ofstream out(ruta, std::ios::binary | std::ios::trunc);
 	for (const auto& reg : registros) {
-		out.write(reg.data(), reg.size());
+		out.write(reg.data(), reg.size());  // se reescribe encriptado, sin cambios
 	}
 	out.close();
 }

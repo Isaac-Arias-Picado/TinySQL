@@ -1,11 +1,13 @@
 #include "StoredDataManager.h"
 #include "SystemCatalog.h"
+#include "Cifrado.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <cstring>
 #include <regex>
 #include <functional>
+
 
 namespace fs = std::filesystem;
 static const std::string DATA_DIR = "./data";
@@ -148,7 +150,7 @@ QueryResult StoredDataManager::eliminarTabla(const std::string& dbName,
 }
 
 // INSERT INTO
-QueryResult StoredDataManager::insertarFila(const std::string& dbName,const std::string& tableName,const std::vector<std::string>& valores) {
+QueryResult StoredDataManager::insertarFila(const std::string& dbName, const std::string& tableName, const std::vector<std::string>& valores) {
     QueryResult r;
     if (dbName.empty()) {
         r.error = "No database selected";
@@ -169,24 +171,24 @@ QueryResult StoredDataManager::insertarFila(const std::string& dbName,const std:
         r.error = "Column count does not match value count";
         return r;
     }
-    std::cout << "DEBUG insertarFila: columnas.size=" << columnas.size() << ", valores.size=" << valores.size() << std::endl;
-    // Validar tipos
+
+    // Validar tipos antes de escribir nada
     for (size_t i = 0; i < columnas.size(); ++i) {
         const Columna& col = columnas[i];
         const std::string& valor = valores[i];
-
         if (col.type == TipoColumna::DATETIME && !esFechaValida(valor)) {
             r.error = "Invalid datetime format: " + valor;
             return r;
         }
     }
 
-    std::string rutaTabla = DATA_DIR + "/" + dbName + "/" + tableName;
-    std::ofstream file(rutaTabla, std::ios::binary | std::ios::app);
-    if (!file.is_open()) {
-        r.error = "Cannot open table file";
-        return r;
-    }
+    // Calcular el tamano total del registro
+    size_t registroSize = 0;
+    for (const auto& col : columnas) registroSize += col.size;
+
+    // Armar toda la fila en un buffer
+    std::vector<char> registro(registroSize, 0);
+    size_t pos = 0;
 
     for (size_t i = 0; i < columnas.size(); ++i) {
         const Columna& col = columnas[i];
@@ -194,27 +196,39 @@ QueryResult StoredDataManager::insertarFila(const std::string& dbName,const std:
 
         if (col.type == TipoColumna::INTEGER) {
             int num = std::stoi(valor);
-            file.write(reinterpret_cast<const char*>(&num), sizeof(int));
+            std::memcpy(registro.data() + pos, &num, sizeof(int));
+            pos += sizeof(int);
         }
         else if (col.type == TipoColumna::DOUBLE) {
             double num = std::stod(valor);
-            file.write(reinterpret_cast<const char*>(&num), sizeof(double));
+            std::memcpy(registro.data() + pos, &num, sizeof(double));
+            pos += sizeof(double);
         }
         else if (col.type == TipoColumna::VARCHAR) {
-            std::vector<char> buffer(col.size, 0);
             for (int j = 0; j < (int)valor.size() && j < col.size; ++j)
-                buffer[j] = valor[j];
-            file.write(buffer.data(), col.size);
+                registro[pos + j] = valor[j];
+            pos += col.size;
         }
         else if (col.type == TipoColumna::DATETIME) {
-            std::vector<char> buffer(19, 0);
             for (int j = 0; j < (int)valor.size() && j < 19; ++j)
-                buffer[j] = valor[j];
-            file.write(buffer.data(), 19);
+                registro[pos + j] = valor[j];
+            pos += 19;
         }
     }
 
+    // Encriptar la fila completa
+    encriptar(registro.data(), (int)registroSize);
+
+    // Escribir la fila encriptada
+    std::string rutaTabla = DATA_DIR + "/" + dbName + "/" + tableName;
+    std::ofstream file(rutaTabla, std::ios::binary | std::ios::app);
+    if (!file.is_open()) {
+        r.error = "Cannot open table file";
+        return r;
+    }
+    file.write(registro.data(), registroSize);
     file.close();
+
     r.success = true;
     r.type = "dml";
     r.message = "Row inserted";
@@ -250,6 +264,7 @@ StoredDataManager::leerFilasConOffset(const std::string& dbName,
     size_t offset = 0;
 
     while (file.read(buffer.data(), registroSize)) {
+        encriptar(buffer.data(), (int)registroSize);
         std::vector<std::string> fila;
         size_t pos = 0;
 

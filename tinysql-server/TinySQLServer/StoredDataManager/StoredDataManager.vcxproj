@@ -139,11 +139,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Cifrado.h" />
     <ClInclude Include="StoredDataManager.h" />
     <ClInclude Include="SystemCatalog.h" />
     <ClInclude Include="Types.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Cifrado.cpp" />
     <ClCompile Include="StoredDataManager.cpp" />
     <ClCompile Include="SystemCatalog.cpp" />
   </ItemGroup>

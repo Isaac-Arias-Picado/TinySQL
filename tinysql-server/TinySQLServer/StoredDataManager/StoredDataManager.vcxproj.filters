@@ -24,12 +24,18 @@
     <ClInclude Include="Types.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Cifrado.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="StoredDataManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="SystemCatalog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Cifrado.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

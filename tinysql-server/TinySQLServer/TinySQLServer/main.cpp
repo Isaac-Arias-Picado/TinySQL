@@ -5,6 +5,7 @@
 #include "json.hpp"
 #include "QueryProcessor.h"
 #include "SystemCatalog.h"
+#include "Cifrado.h"
 
 using json = nlohmann::json;
 static json toJson(const QueryResult& r) {
