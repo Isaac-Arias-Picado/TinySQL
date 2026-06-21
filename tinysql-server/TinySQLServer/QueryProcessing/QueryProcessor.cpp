@@ -236,7 +236,69 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         r = storage.seleccionarFilas(dbContext, tableName, columnas,
             whereColumn, whereOperator, whereValue,
             orderColumn, orderDirection);
+    }
+    else if (cmd.rfind("UPDATE", 0) == 0) {
+        size_t setPos = cmd.find("SET");
+        if (setPos == std::string::npos) {
+            r.error = "UPDATE syntax error: missing SET";
+            return r;
+        }
+        std::string tableName = limpiarNombre(sql.substr(6, setPos - 6));
+
+        size_t wherePos = cmd.find("WHERE");
+        std::string asignacion;
+        if (wherePos != std::string::npos) {
+            asignacion = sql.substr(setPos + 3, wherePos - (setPos + 3));
+        }
+        else {
+            asignacion = sql.substr(setPos + 3);
+        }
+        asignacion = limpiarNombre(asignacion);
+
+        size_t igualPos = asignacion.find('=');
+        if (igualPos == std::string::npos) {
+            r.error = "UPDATE syntax error: missing = in SET";
+            return r;
+        }
+        std::string setColumn = limpiarNombre(asignacion.substr(0, igualPos));
+        std::string setValue = limpiarNombre(asignacion.substr(igualPos + 1));
+        if (!setValue.empty() && setValue.front() == '"') setValue.erase(0, 1);
+        if (!setValue.empty() && setValue.back() == '"') setValue.pop_back();
+
+        std::string whereColumn, whereOperator, whereValue;
+        if (wherePos != std::string::npos) {
+            std::string condicion = limpiarNombre(sql.substr(wherePos + 5));
+            size_t firstSpace = condicion.find(' ');
+            if (firstSpace == std::string::npos) {
+                r.error = "Invalid WHERE clause";
+                return r;
             }
+            whereColumn = limpiarNombre(condicion.substr(0, firstSpace));
+            std::string resto = condicion.substr(firstSpace + 1);
+
+            std::vector<std::string> ops = { "LIKE", "NOT", "=", ">", "<" };
+            int foundOp = -1;
+            for (size_t i = 0; i < ops.size(); ++i) {
+                size_t posOp = resto.find(ops[i]);
+                if (posOp != std::string::npos && (posOp == 0 || resto[posOp - 1] == ' ')) {
+                    foundOp = (int)i;
+                    break;
+                }
+            }
+            if (foundOp == -1) {
+                r.error = "Unsupported operator in WHERE";
+                return r;
+            }
+            whereOperator = ops[foundOp];
+            size_t afterOp = resto.find(whereOperator) + whereOperator.size();
+            whereValue = limpiarNombre(resto.substr(afterOp));
+            if (!whereValue.empty() && whereValue.front() == '"') whereValue.erase(0, 1);
+            if (!whereValue.empty() && whereValue.back() == '"') whereValue.pop_back();
+        }
+
+        r = storage.actualizarFilas(dbContext, tableName, setColumn, setValue,
+            whereColumn, whereOperator, whereValue);
+    }
     else {
         r.error = "Comando no implementado";
     }

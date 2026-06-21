@@ -304,7 +304,6 @@ StoredDataManager::leerFilasConOffset(const std::string& dbName,
     return resultado;
 }
 
-// DELETE FROM ... [WHERE ...]
 QueryResult StoredDataManager::eliminarFilas(const std::string& dbName,
     const std::string& tableName,
     const std::string& whereColumn,
@@ -312,37 +311,24 @@ QueryResult StoredDataManager::eliminarFilas(const std::string& dbName,
     const std::string& whereValue) {
     QueryResult r;
 
-    // Validar base de datos
-    if (dbName.empty()) {
-        r.error = "No database selected";
-        return r;
-    }
-    if (!databases.count(dbName)) {
-        r.error = "Database does not exist";
-        return r;
-    }
+    if (dbName.empty()) { r.error = "No database selected"; return r; }
+    if (!databases.count(dbName)) { r.error = "Database does not exist"; return r; }
 
-    // Validar tabla
     std::vector<Columna> columnas = leerColumnas(dbName, tableName);
-    if (columnas.empty()) {
-        r.error = "Table does not exist";
-        return r;
-    }
+    if (columnas.empty()) { r.error = "Table does not exist"; return r; }
 
     std::string rutaTabla = DATA_DIR + "/" + dbName + "/" + tableName;
     std::ifstream inFile(rutaTabla, std::ios::binary);
-    if (!inFile.is_open()) {
-        r.error = "Cannot open table file";
-        return r;
-    }
+    if (!inFile.is_open()) { r.error = "Cannot open table file"; return r; }
 
     size_t registroSize = 0;
     for (const auto& col : columnas) registroSize += col.size;
 
-    // Leer todos los registros
+    // Leer todos los registros y DESENCRIPTAR
     std::vector<std::vector<char>> todosLosRegistros;
     std::vector<char> buffer(registroSize);
     while (inFile.read(buffer.data(), registroSize)) {
+        encriptar(buffer.data(), (int)registroSize);  // desencriptar
         todosLosRegistros.push_back(buffer);
         buffer.assign(registroSize, 0);
     }
@@ -360,10 +346,7 @@ QueryResult StoredDataManager::eliminarFilas(const std::string& dbName,
     int colIndex = -1;
     if (!whereColumn.empty()) {
         for (size_t i = 0; i < columnas.size(); ++i) {
-            if (columnas[i].name == whereColumn) {
-                colIndex = (int)i;
-                break;
-            }
+            if (columnas[i].name == whereColumn) { colIndex = (int)i; break; }
         }
         if (colIndex == -1) {
             r.error = "Column '" + whereColumn + "' does not exist";
@@ -371,30 +354,25 @@ QueryResult StoredDataManager::eliminarFilas(const std::string& dbName,
         }
     }
 
-    // Funcion para extraer un valor de un registro
+    auto offsetDe = [&](int idx) -> size_t {
+        size_t off = 0;
+        for (int i = 0; i < idx; ++i) off += columnas[i].size;
+        return off;
+        };
+
     auto extraerValor = [&](const std::vector<char>& reg, int idx) -> std::string {
         const Columna& col = columnas[idx];
-        size_t offset = 0;
-        for (int i = 0; i < idx; ++i) offset += columnas[i].size;
-        const char* data = reg.data() + offset;
-
+        const char* data = reg.data() + offsetDe(idx);
         if (col.type == TipoColumna::INTEGER) {
-            int val;
-            std::memcpy(&val, data, sizeof(int));
-            return std::to_string(val);
+            int val; std::memcpy(&val, data, sizeof(int)); return std::to_string(val);
         }
         else if (col.type == TipoColumna::DOUBLE) {
-            double val;
-            std::memcpy(&val, data, sizeof(double));
-            return std::to_string(val);
+            double val; std::memcpy(&val, data, sizeof(double)); return std::to_string(val);
         }
         else if (col.type == TipoColumna::VARCHAR) {
-            std::string result;
-            for (int j = 0; j < col.size; ++j) {
-                if (data[j] == '\0') break;
-                result.push_back(data[j]);
-            }
-            return result;
+            std::string s;
+            for (int j = 0; j < col.size; ++j) { if (data[j] == '\0') break; s.push_back(data[j]); }
+            return s;
         }
         else if (col.type == TipoColumna::DATETIME) {
             return std::string(data, 19);
@@ -402,79 +380,49 @@ QueryResult StoredDataManager::eliminarFilas(const std::string& dbName,
         return "";
         };
 
-    // Convertir a numero si es necesario
-    auto convertirValor = [&](const std::string& val, const Columna& col) -> double {
-        if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
-            return std::stod(val);
-        return 0.0;
-        };
-
-    // Funcion que evalua la condicion
     auto cumpleCondicion = [&](const std::vector<char>& reg) -> bool {
-        if (whereColumn.empty()) return true; // sin WHERE -> elimina todo
-
+        if (whereColumn.empty()) return true;  // sin WHERE -> borra todo
         std::string valorColumna = extraerValor(reg, colIndex);
         const Columna& col = columnas[colIndex];
-
-        if (whereOperator == "=") {
-            return valorColumna == whereValue;
-        }
+        if (whereOperator == "=") return valorColumna == whereValue;
         else if (whereOperator == ">") {
-            if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE) {
-                double a = convertirValor(valorColumna, col);
-                double b = convertirValor(whereValue, col);
-                return a > b;
-            }
+            if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
+                return std::stod(valorColumna) > std::stod(whereValue);
             return valorColumna > whereValue;
         }
         else if (whereOperator == "<") {
-            if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE) {
-                double a = convertirValor(valorColumna, col);
-                double b = convertirValor(whereValue, col);
-                return a < b;
-            }
+            if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
+                return std::stod(valorColumna) < std::stod(whereValue);
             return valorColumna < whereValue;
         }
         else if (whereOperator == "LIKE") {
             std::string patron = whereValue;
             for (size_t i = 0; i < patron.size(); ++i) {
-                if (patron[i] == '%') {
-                    patron.replace(i, 1, ".*");
-                    i += 1;
-                }
+                if (patron[i] == '%') { patron.replace(i, 1, ".*"); i += 1; }
             }
             std::regex regex(patron);
             return std::regex_match(valorColumna, regex);
         }
-        else if (whereOperator == "NOT") {
-            return valorColumna != whereValue;
-        }
+        else if (whereOperator == "NOT") return valorColumna != whereValue;
         return false;
         };
 
-    // Filtrar registros
+    // Filtrar
     std::vector<std::vector<char>> nuevosRegistros;
     size_t eliminados = 0;
     for (const auto& reg : todosLosRegistros) {
-        if (cumpleCondicion(reg)) {
-            eliminados++;
-        }
-        else {
-            nuevosRegistros.push_back(reg);
-        }
+        if (cumpleCondicion(reg)) eliminados++;
+        else nuevosRegistros.push_back(reg);
     }
 
-    // Reescribir archivo
+    // Reescribir RE-ENCRIPTANDO
     std::ofstream outFile(rutaTabla, std::ios::binary | std::ios::trunc);
-    if (!outFile.is_open()) {
-        r.error = "Cannot write table file";
-        return r;
-    }
-    for (const auto& reg : nuevosRegistros) {
-        outFile.write(reg.data(), reg.size());
+    if (!outFile.is_open()) { r.error = "Cannot write table file"; return r; }
+    for (auto& reg : nuevosRegistros) {
+        encriptar(reg.data(), (int)registroSize);  // re-encriptar
+        outFile.write(reg.data(), registroSize);
     }
     outFile.close();
-
 
     r.success = true;
     r.type = "dml";
@@ -483,7 +431,7 @@ QueryResult StoredDataManager::eliminarFilas(const std::string& dbName,
     return r;
 }
 
-// SELECT ... FROM ... [WHERE ...] [ORDER BY ...]
+
 QueryResult StoredDataManager::seleccionarFilas(
     const std::string& dbName,
     const std::string& tableName,
@@ -705,5 +653,154 @@ QueryResult StoredDataManager::seleccionarFilas(
     // Copiar las filas resultado
     r.rows = std::move(filasResultado);
 
+    return r;
+}
+
+QueryResult StoredDataManager::actualizarFilas(const std::string& dbName,
+    const std::string& tableName,
+    const std::string& setColumn,
+    const std::string& setValue,
+    const std::string& whereColumn,
+    const std::string& whereOperator,
+    const std::string& whereValue) {
+    QueryResult r;
+
+    if (dbName.empty()) { r.error = "No database selected"; return r; }
+    if (!databases.count(dbName)) { r.error = "Database does not exist"; return r; }
+
+    std::vector<Columna> columnas = leerColumnas(dbName, tableName);
+    if (columnas.empty()) { r.error = "Table does not exist"; return r; }
+
+    size_t registroSize = 0;
+    for (const auto& col : columnas) registroSize += col.size;
+
+    // Indice de la columna del SET
+    int setIndex = -1;
+    for (size_t i = 0; i < columnas.size(); ++i) {
+        if (columnas[i].name == setColumn) { setIndex = (int)i; break; }
+    }
+    if (setIndex == -1) { r.error = "Column '" + setColumn + "' does not exist"; return r; }
+
+    // Indice de la columna del WHERE (si hay)
+    int whereIndex = -1;
+    if (!whereColumn.empty()) {
+        for (size_t i = 0; i < columnas.size(); ++i) {
+            if (columnas[i].name == whereColumn) { whereIndex = (int)i; break; }
+        }
+        if (whereIndex == -1) { r.error = "Column '" + whereColumn + "' does not exist"; return r; }
+    }
+
+    // Validar formato si la columna del SET es DATETIME
+    if (columnas[setIndex].type == TipoColumna::DATETIME && !esFechaValida(setValue)) {
+        r.error = "Invalid datetime format: " + setValue;
+        return r;
+    }
+
+    // Leer todos los registros y DESENCRIPTAR cada uno
+    std::string rutaTabla = DATA_DIR + "/" + dbName + "/" + tableName;
+    std::ifstream inFile(rutaTabla, std::ios::binary);
+    if (!inFile.is_open()) { r.error = "Cannot open table file"; return r; }
+
+    std::vector<std::vector<char>> registros;
+    std::vector<char> buffer(registroSize);
+    while (inFile.read(buffer.data(), registroSize)) {
+        encriptar(buffer.data(), (int)registroSize);  // desencriptar
+        registros.push_back(buffer);
+        buffer.assign(registroSize, 0);
+    }
+    inFile.close();
+
+    // offset de una columna dentro del registro
+    auto offsetDe = [&](int idx) -> size_t {
+        size_t off = 0;
+        for (int i = 0; i < idx; ++i) off += columnas[i].size;
+        return off;
+        };
+
+    // extraer el valor de una columna (sobre registro YA desencriptado)
+    auto extraerValor = [&](const std::vector<char>& reg, int idx) -> std::string {
+        const Columna& col = columnas[idx];
+        const char* data = reg.data() + offsetDe(idx);
+        if (col.type == TipoColumna::INTEGER) {
+            int val; std::memcpy(&val, data, sizeof(int)); return std::to_string(val);
+        }
+        else if (col.type == TipoColumna::DOUBLE) {
+            double val; std::memcpy(&val, data, sizeof(double)); return std::to_string(val);
+        }
+        else if (col.type == TipoColumna::VARCHAR) {
+            std::string s;
+            for (int j = 0; j < col.size; ++j) { if (data[j] == '\0') break; s.push_back(data[j]); }
+            return s;
+        }
+        else if (col.type == TipoColumna::DATETIME) {
+            return std::string(data, 19);
+        }
+        return "";
+        };
+
+    // evaluar el WHERE
+    auto cumpleCondicion = [&](const std::vector<char>& reg) -> bool {
+        if (whereColumn.empty()) return true;  
+        std::string valorColumna = extraerValor(reg, whereIndex);
+        const Columna& col = columnas[whereIndex];
+        if (whereOperator == "=") return valorColumna == whereValue;
+        else if (whereOperator == ">") {
+            if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
+                return std::stod(valorColumna) > std::stod(whereValue);
+            return valorColumna > whereValue;
+        }
+        else if (whereOperator == "<") {
+            if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
+                return std::stod(valorColumna) < std::stod(whereValue);
+            return valorColumna < whereValue;
+        }
+        else if (whereOperator == "NOT") return valorColumna != whereValue;
+        return false;
+        };
+
+    // escribir el nuevo valor en la columna del SET dentro del registro
+    auto escribirValorEnRegistro = [&](std::vector<char>& reg) {
+        const Columna& col = columnas[setIndex];
+        char* data = reg.data() + offsetDe(setIndex);
+        if (col.type == TipoColumna::INTEGER) {
+            int num = std::stoi(setValue);
+            std::memcpy(data, &num, sizeof(int));
+        }
+        else if (col.type == TipoColumna::DOUBLE) {
+            double num = std::stod(setValue);
+            std::memcpy(data, &num, sizeof(double));
+        }
+        else if (col.type == TipoColumna::VARCHAR) {
+            for (int j = 0; j < col.size; ++j) data[j] = 0;  // limpiar
+            for (int j = 0; j < (int)setValue.size() && j < col.size; ++j) data[j] = setValue[j];
+        }
+        else if (col.type == TipoColumna::DATETIME) {
+            for (int j = 0; j < 19; ++j) data[j] = 0;
+            for (int j = 0; j < (int)setValue.size() && j < 19; ++j) data[j] = setValue[j];
+        }
+        };
+
+    // aplicar el update a las filas que cumplen
+    size_t actualizadas = 0;
+    for (auto& reg : registros) {
+        if (cumpleCondicion(reg)) {
+            escribirValorEnRegistro(reg);
+            actualizadas++;
+        }
+    }
+
+    // reescribir el archivo, reencriptando cada registro
+    std::ofstream outFile(rutaTabla, std::ios::binary | std::ios::trunc);
+    if (!outFile.is_open()) { r.error = "Cannot write table file"; return r; }
+    for (auto& reg : registros) {
+        encriptar(reg.data(), (int)registroSize);  // re-encriptar antes de escribir
+        outFile.write(reg.data(), registroSize);
+    }
+    outFile.close();
+
+    r.success = true;
+    r.type = "dml";
+    r.message = std::to_string(actualizadas) + " rows updated";
+    r.affected_rows = (int)actualizadas;
     return r;
 }

@@ -39,6 +39,14 @@ public:
         const std::string& orderDirection   // "ASC" o "DESC"
     );
 
+    QueryResult actualizarFilas(const std::string& dbName,
+        const std::string& tableName,
+        const std::string& setColumn,
+        const std::string& setValue,
+        const std::string& whereColumn,
+        const std::string& whereOperator,
+        const std::string& whereValue);
+
 private:
     std::set<std::string> databases;
 
