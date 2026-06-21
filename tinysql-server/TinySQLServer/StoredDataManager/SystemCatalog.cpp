@@ -78,9 +78,9 @@ void escribirColumna(const std::string& dbName, const std::string& tableName,
 	file.write(bufTabla.data(), bufTabla.size());
 	file.write(bufCol.data(), bufCol.size());
 
-	int tipo = static_cast<int>(col.type);   // el enum a int
+	int tipo = static_cast<int>(col.type);   
 	int size = col.size;
-	int nullable = col.nullable ? 1 : 0;      // bool a int
+	int nullable = col.nullable ? 1 : 0;  
 	file.write(reinterpret_cast<char*>(&tipo), sizeof(int));
 	file.write(reinterpret_cast<char*>(&size), sizeof(int));
 	file.write(reinterpret_cast<char*>(&nullable), sizeof(int));
@@ -111,7 +111,6 @@ std::vector<Columna> leerColumnas(const std::string& dbName, const std::string& 
 		std::string dbLeido(bufBD.data());
 		std::string tablaLeida(bufTabla.data());
 
-		// Solo nos quedamos con las columnas de la tabla que buscamos
 		if (dbLeido == dbName && tablaLeida == tableName) {
 			Columna col;
 			col.name = std::string(bufCol.data());
@@ -124,4 +123,53 @@ std::vector<Columna> leerColumnas(const std::string& dbName, const std::string& 
 	}
 	file.close();
 	return columnas;
+}
+
+template <typename Predicate>
+void reescribirArchivoFiltrado(const std::string& ruta, size_t recordSize, Predicate pred) {
+	std::ifstream in(ruta, std::ios::binary);
+	if (!in.is_open()) return;
+
+	std::vector<std::vector<char>> registros;
+	std::vector<char> buffer(recordSize);
+	while (in.read(buffer.data(), recordSize)) {
+		if (!pred(buffer)) {
+			registros.push_back(buffer);  
+		}
+		buffer.assign(recordSize, 0);
+	}
+	in.close();
+
+	std::ofstream out(ruta, std::ios::binary | std::ios::trunc);
+	for (const auto& reg : registros) {
+		out.write(reg.data(), reg.size());
+	}
+	out.close();
+}
+
+void eliminarTablaDelCatalogo(const std::string& dbName, const std::string& tableName) {
+	const std::string ruta = "./data/SystemCatalog/SystemTables";
+	const size_t recordSize = registrysize * 2;  
+
+	reescribirArchivoFiltrado(ruta, recordSize, [&](const std::vector<char>& reg) -> bool {
+		// El registro es: dbName (64) + tableName (64)
+		std::string db(reg.data(), registrysize);
+		std::string tbl(reg.data() + registrysize, registrysize);
+		db = std::string(db.c_str());
+		tbl = std::string(tbl.c_str());
+		return (db == dbName && tbl == tableName);  
+		});
+}
+
+void eliminarColumnasDeTabla(const std::string& dbName, const std::string& tableName) {
+	const std::string ruta = "./data/SystemCatalog/SystemColumns";
+	const size_t recordSize = registrysize * 3 + sizeof(int) * 4;
+
+	reescribirArchivoFiltrado(ruta, recordSize, [&](const std::vector<char>& reg) -> bool {
+		std::string db(reg.data(), registrysize);
+		std::string tbl(reg.data() + registrysize, registrysize);
+		db = std::string(db.c_str());
+		tbl = std::string(tbl.c_str());
+		return (db == dbName && tbl == tableName); 
+		});
 }

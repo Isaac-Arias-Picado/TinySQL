@@ -10,6 +10,7 @@ struct QueryResult {
     long long elapsed_ms = 0;
     std::vector<std::string> columns;              
     std::vector<std::vector<std::string>> rows;   
+    int affected_rows = 0;
 };
 
 enum class TipoColumna {

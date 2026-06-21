@@ -12,3 +12,5 @@ std::vector<std::string> leerBasesDatos();
 void escribirTabla(const std::string& dbName, const std::string& tableName);
 void escribirColumna(const std::string& dbName, const std::string& tableName, const Columna& col, int orden);
 std::vector<Columna> leerColumnas(const std::string& dbName, const std::string& tableName);
+void eliminarTablaDelCatalogo(const std::string& dbName, const std::string& tableName);
+void eliminarColumnasDeTabla(const std::string& dbName, const std::string& tableName);
