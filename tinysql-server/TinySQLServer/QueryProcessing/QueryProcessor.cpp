@@ -177,7 +177,7 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
 
         // Procesar WHERE si existe
         if (wherePos != std::string::npos) {
-            std::string whereClause = restoAfterFrom.substr(wherePos + 5);
+            std::string whereClause = limpiarNombre(restoAfterFrom.substr(wherePos + 5));
             size_t firstSpace = whereClause.find(' ');
             if (firstSpace != std::string::npos) {
                 whereColumn = limpiarNombre(whereClause.substr(0, firstSpace));
@@ -229,6 +229,9 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
             }
         }
 
+        std::cout << "DEBUG SELECT WHERE -> col='" << whereColumn
+            << "' op='" << whereOperator
+            << "' val='" << whereValue << "'" << std::endl;
         std::vector<std::string> columnas;
         if (columnasStr == "*") {
             columnas.push_back("*");

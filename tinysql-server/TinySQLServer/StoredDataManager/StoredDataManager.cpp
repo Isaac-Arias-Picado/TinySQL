@@ -708,20 +708,10 @@ QueryResult StoredDataManager::seleccionarFilas(
         if (colIndexWhere == -1) { r.error = "Column '" + whereColumn + "' does not exist"; return r; }
 
         Index* idx = obtenerIndice(dbName, tableName, whereColumn);
-        if (idx) {
+        if (idx && whereOperator == "=") {
             Key key(whereValue, columnasTabla[colIndexWhere].type);
-            if (whereOperator == "=") {
-                size_t off = idx->buscar(key);
-                if (off != static_cast<size_t>(-1)) offsetsFiltrados.push_back(off);
-            }
-            else if (whereOperator == ">" || whereOperator == "<") {
-                Key keyInicio = (whereOperator == ">") ? key : Key("", columnasTabla[colIndexWhere].type);
-                Key keyFin = (whereOperator == "<") ? key : Key("ZZZ", columnasTabla[colIndexWhere].type);
-                offsetsFiltrados = idx->buscarRango(keyInicio, keyFin);
-            }
-            else {
-                // LIKE, NOT -> secuencial
-            }
+            size_t off = idx->buscar(key);
+            if (off != static_cast<size_t>(-1)) offsetsFiltrados.push_back(off);
             usoIndice = !offsetsFiltrados.empty();
         }
     }
@@ -748,12 +738,16 @@ QueryResult StoredDataManager::seleccionarFilas(
             return valorColumna < whereValue;
         }
         else if (whereOperator == "LIKE") {
+            // Convertir valor y patron a minusculas (case-insensitive)
+            std::string valorLower = valorColumna;
             std::string patron = whereValue;
+            for (auto& c : valorLower) c = (char)tolower((unsigned char)c);
+            for (auto& c : patron) c = (char)tolower((unsigned char)c);
             for (size_t i = 0; i < patron.size(); ++i) {
                 if (patron[i] == '%') { patron.replace(i, 1, ".*"); i += 1; }
             }
             std::regex regex(patron);
-            return std::regex_match(valorColumna, regex);
+            return std::regex_match(valorLower, regex);
         }
         else if (whereOperator == "NOT") return valorColumna != whereValue;
         return false;
