@@ -4,39 +4,46 @@
 
 struct QueryResult {
     bool success = false;
-    std::string type;                              
-    std::string message;                
-    std::string error;                             
+    std::string type;
+    std::string message;
+    std::string error;
     long long elapsed_ms = 0;
-    std::vector<std::string> columns;              
-    std::vector<std::vector<std::string>> rows;   
+    std::vector<std::string> columns;
+    std::vector<std::vector<std::string>> rows;
     int affected_rows = 0;
 };
 
 enum class TipoColumna {
-    INTEGER,   
-    DOUBLE,    
-    VARCHAR,   
-    DATETIME   
+    INTEGER,
+    DOUBLE,
+    VARCHAR,
+    DATETIME
 };
 
 struct Columna {
-    std::string name;      
-    TipoColumna type;     
-    int size;               
-    bool nullable;       
+    std::string name;
+    TipoColumna type;
+    int size;
+    bool nullable;
 };
 
+// ========== AGREGADO PARA ÍNDICES ==========
+
+enum class TipoArbol {
+    BST,
+    BTREE
+};
+
+// Clave para índices (comparable según tipo)
 struct Key {
     std::string value;
     TipoColumna type;
 
-    // Constructor
+    Key() : value(""), type(TipoColumna::VARCHAR) {}
     Key(const std::string& val, TipoColumna t) : value(val), type(t) {}
 
-    // Operador de comparación menor que
     bool operator<(const Key& other) const {
-        if (type != other.type) return false; // No debería pasar
+        if (type != other.type) return false;
         switch (type) {
         case TipoColumna::INTEGER:
             return std::stoi(value) < std::stoi(other.value);
@@ -45,7 +52,7 @@ struct Key {
         case TipoColumna::DATETIME:
         case TipoColumna::VARCHAR:
         default:
-            return value < other.value; // Lexicográfico
+            return value < other.value;
         }
     }
 
@@ -64,4 +71,14 @@ struct Key {
     bool operator>(const Key& other) const { return other < *this; }
     bool operator<=(const Key& other) const { return !(*this > other); }
     bool operator>=(const Key& other) const { return !(*this < other); }
+};
+
+// Estructura para almacenar información de índices desde SystemCatalog
+struct IndiceInfo {
+    std::string dbName;
+    std::string tableName;
+    std::string indexName;
+    std::string columnName;
+    TipoColumna tipoColumna;
+    TipoArbol tipoArbol;
 };

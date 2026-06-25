@@ -26,4 +26,10 @@ private:
 
     // DROP TABLE
     std::string extraerNombreTablaDrop(const std::string& sql);
+
+    // ========== NUEVOS MÉTODOS PARA ÍNDICES ==========
+    std::string extraerNombreIndice(const std::string& sql);
+    std::string extraerNombreTablaIndex(const std::string& sql);
+    std::string extraerColumnaIndex(const std::string& sql);
+    std::string extraerTipoArbol(const std::string& sql);
 };

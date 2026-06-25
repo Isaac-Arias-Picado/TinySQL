@@ -68,6 +68,24 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         }
         r = storage.insertarFila(dbContext, tabla, valores);
     }
+    // ========== NUEVO: CREATE INDEX ==========
+    else if (cmd.rfind("CREATE INDEX", 0) == 0) {
+        std::string indexName = extraerNombreIndice(sql);
+        std::string tableName = extraerNombreTablaIndex(sql);
+        std::string columnName = extraerColumnaIndex(sql);
+        std::string treeType = extraerTipoArbol(sql);
+
+        if (indexName.empty() || tableName.empty() || columnName.empty()) {
+            r.error = "Invalid CREATE INDEX syntax";
+            return r;
+        }
+        if (treeType != "BST" && treeType != "BTREE") {
+            r.error = "Invalid index type. Use BST or BTREE";
+            return r;
+        }
+
+        r = storage.crearIndice(dbContext, tableName, indexName, columnName, treeType);
+    }
     else if (cmd.rfind("SET DATABASE", 0) == 0) {
         std::string nombre = limpiarNombre(sql.substr(12));
         if (storage.existeBaseDatos(nombre)) {
@@ -130,10 +148,10 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
     }
     else if (cmd.rfind("SELECT", 0) == 0) {
         // Parsear SELECT
-        std::string resto = sql.substr(6); 
+        std::string resto = sql.substr(6);
         resto = limpiarNombre(resto);
 
-        // Extraer columnas 
+        // Extraer columnas
         size_t fromPos = resto.find("FROM");
         if (fromPos == std::string::npos) {
             r.error = "SELECT syntax error: missing FROM";
@@ -142,7 +160,7 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         std::string columnasStr = limpiarNombre(resto.substr(0, fromPos));
         std::string restoAfterFrom = limpiarNombre(resto.substr(fromPos + 4));
 
-        // Extraer nombre de tabla 
+        // Extraer nombre de tabla
         std::string tableName;
         std::string whereColumn, whereOperator, whereValue;
         std::string orderColumn, orderDirection;
@@ -305,6 +323,7 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
     return r;
 }
 
+// ================== MÉTODOS AUXILIARES EXISTENTES ==================
 
 // Para CREATE TABLE: extrae el nombre de la tabla
 std::string QueryProcessor::extraerNombreTabla(const std::string& sql) {
@@ -352,7 +371,6 @@ std::vector<std::string> QueryProcessor::partirPorComas(const std::string& bloqu
     }
     return partes;
 }
-
 
 // Para CREATE TABLE: parsea el tipo de dato
 TipoColumna QueryProcessor::parsearTipo(const std::string& tipoTexto) {
@@ -404,7 +422,6 @@ Columna QueryProcessor::parsearColumna(const std::string& texto) {
     return col;
 }
 
-
 // Para INSERT: extrae el nombre de la tabla entre "INTO" y "VALUES"
 std::string QueryProcessor::extraerNombreTablaInsert(const std::string& sql) {
     size_t inicioInto = sql.find("INTO");
@@ -426,7 +443,6 @@ std::string QueryProcessor::extraerNombreTablaInsert(const std::string& sql) {
 std::vector<std::string> QueryProcessor::extraerValores(const std::string& sql) {
     std::vector<std::string> valores;
 
-    // Buscar "VALUES" en la cadena original (sin convertir a mayusculas)
     size_t valuesPos = sql.find("VALUES");
     if (valuesPos == std::string::npos) {
         valuesPos = sql.find("values");
@@ -435,7 +451,6 @@ std::vector<std::string> QueryProcessor::extraerValores(const std::string& sql) 
             return valores;
         }
     }
-
 
     size_t inicio = sql.find("(", valuesPos);
     if (inicio == std::string::npos) {
@@ -495,4 +510,59 @@ std::string QueryProcessor::extraerNombreTablaDrop(const std::string& sql) {
     if (fin == std::string::npos) fin = resto.size();
     std::string nombre = resto.substr(0, fin);
     return limpiarNombre(nombre);
+}
+
+// ========== NUEVOS MÉTODOS PARA ÍNDICES ==========
+
+// Para CREATE INDEX: extrae el nombre del índice (después de "CREATE INDEX")
+std::string QueryProcessor::extraerNombreIndice(const std::string& sql) {
+    size_t inicio = sql.find("INDEX");
+    if (inicio == std::string::npos) return "";
+    size_t inicioNombre = inicio + 5;
+    while (inicioNombre < sql.size() && (sql[inicioNombre] == ' ' || sql[inicioNombre] == '\t')) inicioNombre++;
+    size_t finNombre = sql.find(" ON ", inicioNombre);
+    if (finNombre == std::string::npos) return "";
+    std::string nombre = sql.substr(inicioNombre, finNombre - inicioNombre);
+    return limpiarNombre(nombre);
+}
+
+// Para CREATE INDEX: extrae el nombre de la tabla (después de "ON")
+std::string QueryProcessor::extraerNombreTablaIndex(const std::string& sql) {
+    size_t onPos = sql.find("ON");
+    if (onPos == std::string::npos) return "";
+    size_t inicioNombre = onPos + 2;
+    while (inicioNombre < sql.size() && (sql[inicioNombre] == ' ' || sql[inicioNombre] == '\t')) inicioNombre++;
+    size_t finNombre = sql.find("(", inicioNombre);
+    if (finNombre == std::string::npos) return "";
+    std::string nombre = sql.substr(inicioNombre, finNombre - inicioNombre);
+    return limpiarNombre(nombre);
+}
+
+// Para CREATE INDEX: extrae el nombre de la columna (dentro de paréntesis después de la tabla)
+std::string QueryProcessor::extraerColumnaIndex(const std::string& sql) {
+    size_t inicio = sql.find("(");
+    if (inicio == std::string::npos) return "";
+    size_t fin = sql.find(")", inicio);
+    if (fin == std::string::npos) return "";
+    std::string columna = sql.substr(inicio + 1, fin - inicio - 1);
+    return limpiarNombre(columna);
+}
+
+// Para CREATE INDEX: extrae el tipo de árbol (después de "OF TYPE")
+std::string QueryProcessor::extraerTipoArbol(const std::string& sql) {
+    // Buscar "OF TYPE" en la cadena original (puede estar en mayúsculas o minúsculas)
+    std::string upper = sql;
+    for (auto& c : upper) c = toupper(c);
+    size_t ofPos = upper.find("OF TYPE");
+    if (ofPos == std::string::npos) {
+        // También podría ser solo "TYPE" según el formato, pero el PDF dice "OF TYPE"
+        return "";
+    }
+    size_t inicioTipo = ofPos + 7; // longitud de "OF TYPE"
+    while (inicioTipo < sql.size() && (sql[inicioTipo] == ' ' || sql[inicioTipo] == '\t')) inicioTipo++;
+    // El tipo termina al final de la línea o con punto y coma
+    size_t finTipo = sql.find_first_of(" \t;", inicioTipo);
+    if (finTipo == std::string::npos) finTipo = sql.size();
+    std::string tipo = sql.substr(inicioTipo, finTipo - inicioTipo);
+    return limpiarNombre(tipo);
 }
