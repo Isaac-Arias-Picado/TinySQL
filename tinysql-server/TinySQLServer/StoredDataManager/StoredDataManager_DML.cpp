@@ -293,14 +293,6 @@ QueryResult StoredDataManager::seleccionarFilas(
     std::vector<Columna> columnasTabla = leerColumnas(dbName, tableName);
     if (columnasTabla.empty()) { r.error = "Table does not exist"; return r; }
 
-    auto filasConOffset = leerFilasConOffset(dbName, tableName);
-    if (filasConOffset.empty()) {
-        r.success = true;
-        r.type = "select";
-        r.message = "0 rows selected";
-        return r;
-    }
-
     // Determinar que columnas se van a mostrar (todas si es "*")
     std::vector<int> indicesSeleccionados;
     bool seleccionarTodas = columnas.empty() || (columnas.size() == 1 && columnas[0] == "*");
@@ -321,93 +313,99 @@ QueryResult StoredDataManager::seleccionarFilas(
         }
     }
 
-    // Si el WHERE es de igualdad y la columna tiene indice, lo usamos para ubicar
-    // la fila directo por su offset. En los demas casos, busqueda secuencial.
-    std::vector<size_t> offsetsFiltrados;
-    bool usoIndice = false;
+    // Ver si podemos usar indice: WHERE de igualdad sobre una columna indexada
     int colIndexWhere = -1;
+    Index* idx = nullptr;
     if (!whereColumn.empty()) {
         for (size_t i = 0; i < columnasTabla.size(); ++i) {
             if (columnasTabla[i].name == whereColumn) { colIndexWhere = (int)i; break; }
         }
         if (colIndexWhere == -1) { r.error = "Column '" + whereColumn + "' does not exist"; return r; }
 
-        Index* idx = obtenerIndice(dbName, tableName, whereColumn);
-        if (idx && whereOperator == "=") {
-            Key key(whereValue, columnasTabla[colIndexWhere].type);
-            size_t off = idx->buscar(key);
-            if (off != static_cast<size_t>(-1)) offsetsFiltrados.push_back(off);
-            usoIndice = !offsetsFiltrados.empty();
+        if (whereOperator == "=") {
+            idx = obtenerIndice(dbName, tableName, whereColumn);
         }
     }
 
-    // Toma el valor de una columna de una fila ya leida
-    auto extraerValor = [&](const std::vector<std::string>& fila, int idx) -> std::string {
-        return (idx >= 0 && idx < (int)fila.size()) ? fila[idx] : "";
-        };
-
-    // Evalua el WHERE para la busqueda secuencial
-    auto cumpleCondicion = [&](const std::vector<std::string>& fila) -> bool {
-        if (whereColumn.empty()) return true;
-        std::string valorColumna = extraerValor(fila, colIndexWhere);
-        const Columna& col = columnasTabla[colIndexWhere];
-        if (whereOperator == "=") return valorColumna == whereValue;
-        else if (whereOperator == ">") {
-            if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
-                return std::stod(valorColumna) > std::stod(whereValue);
-            return valorColumna > whereValue;
-        }
-        else if (whereOperator == "<") {
-            if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
-                return std::stod(valorColumna) < std::stod(whereValue);
-            return valorColumna < whereValue;
-        }
-        else if (whereOperator == "LIKE") {
-            // Comparacion sin distinguir mayusculas. El % se traduce a ".*".
-            std::string valorLower = valorColumna;
-            std::string patron = whereValue;
-            for (auto& c : valorLower) c = (char)tolower((unsigned char)c);
-            for (auto& c : patron) c = (char)tolower((unsigned char)c);
-            for (size_t i = 0; i < patron.size(); ++i) {
-                if (patron[i] == '%') { patron.replace(i, 1, ".*"); i += 1; }
-            }
-            std::regex regex(patron);
-            return std::regex_match(valorLower, regex);
-        }
-        else if (whereOperator == "NOT") return valorColumna != whereValue;
-        return false;
-        };
-
-    // Armar el resultado: con indice usamos los offsets, si no recorremos todo
     std::vector<std::vector<std::string>> filasResultado;
-    if (usoIndice) {
-        for (size_t off : offsetsFiltrados) {
-            for (const auto& par : filasConOffset) {
-                if (par.second == off) {
-                    std::vector<std::string> filaSeleccionada;
-                    for (int idx : indicesSeleccionados) {
-                        filaSeleccionada.push_back(par.first[idx]);
-                    }
-                    filasResultado.push_back(filaSeleccionada);
-                    break;
+
+    if (idx) {
+        //CAMINO CON INDICE
+        // El indice nos da el offset de la fila buscada. Leemos solo esa fila
+        // directo del disco, sin tocar el resto de la tabla.
+        Key key(whereValue, columnasTabla[colIndexWhere].type);
+        size_t off = idx->buscar(key);
+        if (off != static_cast<size_t>(-1)) {
+            std::vector<std::string> filaCompleta = leerFilaEnOffset(dbName, tableName, off);
+            if (!filaCompleta.empty()) {
+                std::vector<std::string> filaSeleccionada;
+                for (int i : indicesSeleccionados) {
+                    filaSeleccionada.push_back(filaCompleta[i]);
                 }
+                filasResultado.push_back(filaSeleccionada);
             }
         }
     }
     else {
+        //CAMINO SECUENCIAL
+        // Sin indice (o WHERE que no es "="), leemos todas las filas y filtramos.
+        auto filasConOffset = leerFilasConOffset(dbName, tableName);
+        if (filasConOffset.empty()) {
+            r.success = true;
+            r.type = "select";
+            r.message = "0 rows selected";
+            return r;
+        }
+
+        // Toma el valor de una columna de una fila ya leida
+        auto extraerValor = [&](const std::vector<std::string>& fila, int idx) -> std::string {
+            return (idx >= 0 && idx < (int)fila.size()) ? fila[idx] : "";
+            };
+
+        // Evalua el WHERE para la busqueda secuencial
+        auto cumpleCondicion = [&](const std::vector<std::string>& fila) -> bool {
+            if (whereColumn.empty()) return true;
+            std::string valorColumna = extraerValor(fila, colIndexWhere);
+            const Columna& col = columnasTabla[colIndexWhere];
+            if (whereOperator == "=") return valorColumna == whereValue;
+            else if (whereOperator == ">") {
+                if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
+                    return std::stod(valorColumna) > std::stod(whereValue);
+                return valorColumna > whereValue;
+            }
+            else if (whereOperator == "<") {
+                if (col.type == TipoColumna::INTEGER || col.type == TipoColumna::DOUBLE)
+                    return std::stod(valorColumna) < std::stod(whereValue);
+                return valorColumna < whereValue;
+            }
+            else if (whereOperator == "LIKE") {
+                // Comparacion sin distinguir mayusculas. El % se traduce a ".*".
+                std::string valorLower = valorColumna;
+                std::string patron = whereValue;
+                for (auto& c : valorLower) c = (char)tolower((unsigned char)c);
+                for (auto& c : patron) c = (char)tolower((unsigned char)c);
+                for (size_t i = 0; i < patron.size(); ++i) {
+                    if (patron[i] == '%') { patron.replace(i, 1, ".*"); i += 1; }
+                }
+                std::regex regex(patron);
+                return std::regex_match(valorLower, regex);
+            }
+            else if (whereOperator == "NOT") return valorColumna != whereValue;
+            return false;
+            };
+
         for (const auto& par : filasConOffset) {
             if (cumpleCondicion(par.first)) {
                 std::vector<std::string> filaSeleccionada;
-                for (int idx : indicesSeleccionados) {
-                    filaSeleccionada.push_back(par.first[idx]);
+                for (int i : indicesSeleccionados) {
+                    filaSeleccionada.push_back(par.first[i]);
                 }
                 filasResultado.push_back(filaSeleccionada);
             }
         }
     }
 
-    // ORDER BY con Quicksort propio (no usa std::sort). La lambda recursiva usa
-    // std::function para poder llamarse a si misma.
+    // ORDER BY con Quicksort propio (no usa std::sort). 
     if (!orderColumn.empty()) {
         int idxOrder = -1;
         for (size_t i = 0; i < columnasTabla.size(); ++i) {
@@ -415,41 +413,49 @@ QueryResult StoredDataManager::seleccionarFilas(
         }
         if (idxOrder == -1) { r.error = "Column '" + orderColumn + "' does not exist for ORDER BY"; return r; }
 
-        std::function<void(std::vector<std::vector<std::string>>&, int, int)> quicksort =
-            [&](std::vector<std::vector<std::string>>& arr, int left, int right) {
-            if (left >= right) return;
-            int mid = (left + right) / 2;
+        // El idxOrder es sobre la tabla completa, pero filasResultado solo tiene
+        // las columnas seleccionadas. Buscamos la posicion del ORDER dentro de
+        // las seleccionadas.
+        int posEnResultado = -1;
+        for (size_t i = 0; i < indicesSeleccionados.size(); ++i) {
+            if (indicesSeleccionados[i] == idxOrder) { posEnResultado = (int)i; break; }
+        }
+
+        if (posEnResultado != -1) {
             const Columna& colOrder = columnasTabla[idxOrder];
-            std::string pivotStr = arr[mid][idxOrder];
-            // Compara como numero si la columna es numerica, si no como texto
-            auto menor = [&](const std::string& a, const std::string& b) -> bool {
-                if (colOrder.type == TipoColumna::INTEGER || colOrder.type == TipoColumna::DOUBLE)
-                    return std::stod(a) < std::stod(b);
-                return a < b;
-                };
-            int i = left, j = right;
-            while (i <= j) {
-                while (menor(arr[i][idxOrder], pivotStr)) i++;
-                while (menor(pivotStr, arr[j][idxOrder])) j--;
-                if (i <= j) {
-                    std::swap(arr[i], arr[j]);
-                    i++; j--;
+            std::function<void(std::vector<std::vector<std::string>>&, int, int)> quicksort =
+                [&](std::vector<std::vector<std::string>>& arr, int left, int right) {
+                if (left >= right) return;
+                int mid = (left + right) / 2;
+                std::string pivotStr = arr[mid][posEnResultado];
+                auto menor = [&](const std::string& a, const std::string& b) -> bool {
+                    if (colOrder.type == TipoColumna::INTEGER || colOrder.type == TipoColumna::DOUBLE)
+                        return std::stod(a) < std::stod(b);
+                    return a < b;
+                    };
+                int i = left, j = right;
+                while (i <= j) {
+                    while (menor(arr[i][posEnResultado], pivotStr)) i++;
+                    while (menor(pivotStr, arr[j][posEnResultado])) j--;
+                    if (i <= j) {
+                        std::swap(arr[i], arr[j]);
+                        i++; j--;
+                    }
                 }
+                quicksort(arr, left, j);
+                quicksort(arr, i, right);
+                };
+            quicksort(filasResultado, 0, (int)filasResultado.size() - 1);
+            if (orderDirection == "DESC") {
+                std::reverse(filasResultado.begin(), filasResultado.end());
             }
-            quicksort(arr, left, j);
-            quicksort(arr, i, right);
-            };
-        quicksort(filasResultado, 0, (int)filasResultado.size() - 1);
-        // El Quicksort ordena ascendente; para DESC invertimos
-        if (orderDirection == "DESC") {
-            std::reverse(filasResultado.begin(), filasResultado.end());
         }
     }
 
     r.success = true;
     r.type = "select";
     r.message = std::to_string(filasResultado.size()) + " rows selected";
-    for (int idx : indicesSeleccionados) r.columns.push_back(columnasTabla[idx].name);
+    for (int i : indicesSeleccionados) r.columns.push_back(columnasTabla[i].name);
     r.rows = std::move(filasResultado);
     return r;
 }
@@ -617,7 +623,9 @@ QueryResult StoredDataManager::actualizarFilas(const std::string& dbName,
 //Lectura de filas
 
 // Lee todas las filas de una tabla y devuelve, por cada una, sus valores ya
-// convertidos a string junto con el offset
+// convertidos a string junto con el offset (posicion en bytes) donde empieza en
+// el archivo. Ese offset es lo que los indices guardan. Cada registro se
+// desencripta al leerlo.
 std::vector<std::pair<std::vector<std::string>, size_t>>
 StoredDataManager::leerFilasConOffset(const std::string& dbName,
     const std::string& tableName) {
@@ -652,7 +660,6 @@ StoredDataManager::leerFilasConOffset(const std::string& dbName,
                 pos += sizeof(double);
             }
             else if (col.type == TipoColumna::VARCHAR) {
-                // Tomamos los bytes de la columna y cortamos en el primer cero
                 valor = std::string(buffer.data() + pos, col.size);
                 valor = std::string(valor.c_str());
                 pos += col.size;
@@ -668,6 +675,59 @@ StoredDataManager::leerFilasConOffset(const std::string& dbName,
     }
     file.close();
     return resultado;
+}
+
+// Lee una sola fila ubicada en 'offset' bytes dentro del archivo de la tabla.
+std::vector<std::string> StoredDataManager::leerFilaEnOffset(
+    const std::string& dbName, const std::string& tableName, size_t offset) {
+    std::vector<std::string> fila;
+    std::vector<Columna> columnas = leerColumnas(dbName, tableName);
+    if (columnas.empty()) return fila;
+
+    size_t registroSize = 0;
+    for (const auto& col : columnas) registroSize += col.size;
+    if (registroSize == 0) return fila;
+
+    std::string ruta = DATA_DIR + "/" + dbName + "/" + tableName;
+    std::ifstream file(ruta, std::ios::binary);
+    if (!file.is_open()) return fila;
+
+    // Saltar directo a la posicion de la fila (sin leer las anteriores)
+    file.seekg(offset, std::ios::beg);
+
+    std::vector<char> buffer(registroSize);
+    if (!file.read(buffer.data(), registroSize)) {
+        file.close();
+        return fila;
+    }
+    file.close();
+
+    encriptar(buffer.data(), (int)registroSize);
+    size_t pos = 0;
+    for (const auto& col : columnas) {
+        std::string valor;
+        if (col.type == TipoColumna::INTEGER) {
+            int num; std::memcpy(&num, buffer.data() + pos, sizeof(int));
+            valor = std::to_string(num);
+            pos += sizeof(int);
+        }
+        else if (col.type == TipoColumna::DOUBLE) {
+            double num; std::memcpy(&num, buffer.data() + pos, sizeof(double));
+            valor = std::to_string(num);
+            pos += sizeof(double);
+        }
+        else if (col.type == TipoColumna::VARCHAR) {
+            valor = std::string(buffer.data() + pos, col.size);
+            valor = std::string(valor.c_str());
+            pos += col.size;
+        }
+        else if (col.type == TipoColumna::DATETIME) {
+            valor = std::string(buffer.data() + pos, 19);
+            pos += 19;
+        }
+        fila.push_back(valor);
+    }
+    return fila;
 }
 
 //Validacion

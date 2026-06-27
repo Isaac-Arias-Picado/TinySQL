@@ -83,4 +83,9 @@ private:
     std::vector<std::pair<std::vector<std::string>, size_t>>
         leerFilasConOffset(const std::string& dbName,
             const std::string& tableName);
+
+    // Lee UNA sola fila directo desde su offset, sin recorrer toda la tabla.
+    // Es lo que hace rapida la busqueda cuando hay indice.
+    std::vector<std::string> leerFilaEnOffset(const std::string& dbName,
+        const std::string& tableName, size_t offset);
 };

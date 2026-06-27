@@ -108,6 +108,9 @@ QueryResult StoredDataManager::crearIndice(const std::string& dbName,
     std::set<Key, std::function<bool(const Key&, const Key&)>> keysSet(
         [tipoCol](const Key& a, const Key& b) { return a < b; });
     for (const auto& par : filasConOffset) {
+        if (colIndex >= (int)par.first.size()) {
+            continue;  // fila con menos columnas de las esperadas, la saltamos
+        }
         Key key(par.first[colIndex], tipoCol);
         if (keysSet.find(key) != keysSet.end()) {
             r.error = "Index cannot be created: duplicate values in column";
@@ -131,6 +134,7 @@ QueryResult StoredDataManager::crearIndice(const std::string& dbName,
 
     // Llenar el arbol con los datos existentes
     for (const auto& par : filasConOffset) {
+        if (colIndex >= (int)par.first.size()) continue;
         Key key(par.first[colIndex], tipoCol);
         idx->insertar(key, par.second);
     }
