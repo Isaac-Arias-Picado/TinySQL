@@ -144,6 +144,8 @@
     <ClInclude Include="QueryProcessor.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Parser_DDL.cpp" />
+    <ClCompile Include="Parser_DML.cpp" />
     <ClCompile Include="QueryProcessor.cpp" />
   </ItemGroup>
   <ItemGroup>

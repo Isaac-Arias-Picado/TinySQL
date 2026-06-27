@@ -1,8 +1,7 @@
 #include "QueryProcessor.h"
 #include <cctype>
-#include <iostream>
 
-// Limpia espacios, tabuladores y punto y coma final
+// Recorta espacios y tabuladores de los extremos y elimina el ';' final si existe.
 std::string QueryProcessor::limpiarNombre(const std::string& raw) {
     std::string nombre = raw;
     size_t start = nombre.find_first_not_of(" \t");
@@ -17,7 +16,8 @@ std::string QueryProcessor::limpiarNombre(const std::string& raw) {
     return nombre;
 }
 
-// Punto de entrada principal
+// Punto de entrada de la capa. Detecta cual es el comando segun como empieza
+// la sentencia y arma los parametros para llamar a StoredDataManager.
 QueryResult QueryProcessor::execute(const std::string& sql, const std::string& dbContext) {
     std::string cmd = sql;
     for (auto& c : cmd) c = toupper((unsigned char)c);
@@ -38,7 +38,6 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         for (const auto& texto : textosColumnas) {
             columnas.push_back(parsearColumna(texto));
         }
-
         r = storage.crearTabla(dbContext, nombreTabla, columnas);
     }
     else if (cmd.rfind("DROP TABLE", 0) == 0) {
@@ -52,12 +51,6 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
     else if (cmd.rfind("INSERT", 0) == 0) {
         std::string tabla = extraerNombreTablaInsert(sql);
         std::vector<std::string> valores = extraerValores(sql);
-
-        std::cout << "DEBUG execute: tabla='" << tabla << "', valores.size=" << valores.size() << std::endl;
-        for (size_t i = 0; i < valores.size(); ++i) {
-            std::cout << "  valor[" << i << "] = '" << valores[i] << "'" << std::endl;
-        }
-
         if (tabla.empty()) {
             r.error = "Invalid INSERT syntax: table name missing";
             return r;
@@ -68,7 +61,6 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         }
         r = storage.insertarFila(dbContext, tabla, valores);
     }
-    // ========== NUEVO: CREATE INDEX ==========
     else if (cmd.rfind("CREATE INDEX", 0) == 0) {
         std::string indexName = extraerNombreIndice(sql);
         std::string tableName = extraerNombreTablaIndex(sql);
@@ -83,7 +75,6 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
             r.error = "Invalid index type. Use BST or BTREE";
             return r;
         }
-
         r = storage.crearIndice(dbContext, tableName, indexName, columnName, treeType);
     }
     else if (cmd.rfind("SET DATABASE", 0) == 0) {
@@ -104,18 +95,18 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
             return r;
         }
 
+        // El nombre de la tabla es la palabra que sigue a FROM
         size_t startTable = fromPos + 4;
         while (startTable < sql.size() && (sql[startTable] == ' ' || sql[startTable] == '\t')) startTable++;
         size_t endTable = sql.find_first_of(" \t", startTable);
         if (endTable == std::string::npos) endTable = sql.size();
         std::string tableName = limpiarNombre(sql.substr(startTable, endTable - startTable));
 
+        // El WHERE es opcional; si no esta, se borran todas las filas
         std::string whereColumn, whereOperator, whereValue;
-
         size_t wherePos = cmd.find("WHERE");
         if (wherePos != std::string::npos) {
-            std::string condicion = sql.substr(wherePos + 5);
-            condicion = limpiarNombre(condicion);
+            std::string condicion = limpiarNombre(sql.substr(wherePos + 5));
             size_t firstSpace = condicion.find(' ');
             if (firstSpace == std::string::npos) {
                 r.error = "Invalid WHERE clause";
@@ -124,6 +115,7 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
             whereColumn = limpiarNombre(condicion.substr(0, firstSpace));
             std::string resto = condicion.substr(firstSpace + 1);
 
+            // Buscamos cual de los operadores soportados aparece en la condicion
             std::vector<std::string> ops = { "LIKE", "NOT", "=", ">", "<" };
             int foundOp = -1;
             for (size_t i = 0; i < ops.size(); ++i) {
@@ -143,15 +135,12 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
             if (!whereValue.empty() && whereValue.front() == '"') whereValue.erase(0, 1);
             if (!whereValue.empty() && whereValue.back() == '"') whereValue.pop_back();
         }
-
         r = storage.eliminarFilas(dbContext, tableName, whereColumn, whereOperator, whereValue);
     }
     else if (cmd.rfind("SELECT", 0) == 0) {
-        // Parsear SELECT
-        std::string resto = sql.substr(6);
-        resto = limpiarNombre(resto);
+        std::string resto = limpiarNombre(sql.substr(6));
 
-        // Extraer columnas
+        // Lo que va entre SELECT y FROM son las columnas pedidas
         size_t fromPos = resto.find("FROM");
         if (fromPos == std::string::npos) {
             r.error = "SELECT syntax error: missing FROM";
@@ -160,29 +149,25 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         std::string columnasStr = limpiarNombre(resto.substr(0, fromPos));
         std::string restoAfterFrom = limpiarNombre(resto.substr(fromPos + 4));
 
-        // Extraer nombre de tabla
         std::string tableName;
         std::string whereColumn, whereOperator, whereValue;
         std::string orderColumn, orderDirection;
 
-        // Buscar WHERE
+        // El nombre de la tabla termina donde empieza WHERE u ORDER BY (lo que venga primero)
         size_t wherePos = restoAfterFrom.find("WHERE");
         size_t orderPos = restoAfterFrom.find("ORDER BY");
-
         size_t endTable = restoAfterFrom.size();
         if (wherePos != std::string::npos) endTable = wherePos;
         if (orderPos != std::string::npos && orderPos < endTable) endTable = orderPos;
-
         tableName = limpiarNombre(restoAfterFrom.substr(0, endTable));
 
-        // Procesar WHERE si existe
+        // WHERE opcional
         if (wherePos != std::string::npos) {
             std::string whereClause = limpiarNombre(restoAfterFrom.substr(wherePos + 5));
             size_t firstSpace = whereClause.find(' ');
             if (firstSpace != std::string::npos) {
                 whereColumn = limpiarNombre(whereClause.substr(0, firstSpace));
                 std::string restoWhere = limpiarNombre(whereClause.substr(firstSpace + 1));
-                // Buscar operador
                 std::vector<std::string> ops = { "LIKE", "NOT", "=", ">", "<" };
                 int foundOp = -1;
                 for (size_t i = 0; i < ops.size(); ++i) {
@@ -199,7 +184,6 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
                 whereOperator = ops[foundOp];
                 size_t afterOp = restoWhere.find(whereOperator) + whereOperator.size();
                 whereValue = limpiarNombre(restoWhere.substr(afterOp));
-                // Quitar comillas
                 if (!whereValue.empty() && whereValue.front() == '"') whereValue.erase(0, 1);
                 if (!whereValue.empty() && whereValue.back() == '"') whereValue.pop_back();
             }
@@ -209,11 +193,9 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
             }
         }
 
-        // Procesar ORDER BY si existe
+        // ORDER BY opcional: columna y direccion (ASC por defecto)
         if (orderPos != std::string::npos) {
-            std::string orderClause = restoAfterFrom.substr(orderPos + 8);
-            orderClause = limpiarNombre(orderClause);
-            // Dividir en columna y direccion
+            std::string orderClause = limpiarNombre(restoAfterFrom.substr(orderPos + 8));
             size_t space = orderClause.find(' ');
             if (space != std::string::npos) {
                 orderColumn = limpiarNombre(orderClause.substr(0, space));
@@ -221,23 +203,19 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
             }
             else {
                 orderColumn = limpiarNombre(orderClause);
-                orderDirection = "ASC"; // por defecto
+                orderDirection = "ASC";
             }
-            // Normalizar direccion
             if (orderDirection != "ASC" && orderDirection != "DESC") {
                 orderDirection = "ASC";
             }
         }
 
-        std::cout << "DEBUG SELECT WHERE -> col='" << whereColumn
-            << "' op='" << whereOperator
-            << "' val='" << whereValue << "'" << std::endl;
+        // Las columnas pedidas pueden ser "*" o una lista separada por comas
         std::vector<std::string> columnas;
         if (columnasStr == "*") {
             columnas.push_back("*");
         }
         else {
-            // Dividir por comas
             std::string actual;
             for (char c : columnasStr) {
                 if (c == ',') {
@@ -253,12 +231,12 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
             }
         }
 
-        // Llamar a StoredDataManager
         r = storage.seleccionarFilas(dbContext, tableName, columnas,
             whereColumn, whereOperator, whereValue,
             orderColumn, orderDirection);
     }
     else if (cmd.rfind("UPDATE", 0) == 0) {
+        // Formato: UPDATE tabla SET columna = valor [WHERE ...]
         size_t setPos = cmd.find("SET");
         if (setPos == std::string::npos) {
             r.error = "UPDATE syntax error: missing SET";
@@ -266,6 +244,7 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         }
         std::string tableName = limpiarNombre(sql.substr(6, setPos - 6));
 
+        // La asignacion del SET va entre "SET" y "WHERE" (o hasta el final)
         size_t wherePos = cmd.find("WHERE");
         std::string asignacion;
         if (wherePos != std::string::npos) {
@@ -286,6 +265,7 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         if (!setValue.empty() && setValue.front() == '"') setValue.erase(0, 1);
         if (!setValue.empty() && setValue.back() == '"') setValue.pop_back();
 
+        // Mismo parseo de WHERE que en las otras sentencias
         std::string whereColumn, whereOperator, whereValue;
         if (wherePos != std::string::npos) {
             std::string condicion = limpiarNombre(sql.substr(wherePos + 5));
@@ -324,248 +304,4 @@ QueryResult QueryProcessor::execute(const std::string& sql, const std::string& d
         r.error = "Comando no implementado";
     }
     return r;
-}
-
-// ================== MÉTODOS AUXILIARES EXISTENTES ==================
-
-// Para CREATE TABLE: extrae el nombre de la tabla
-std::string QueryProcessor::extraerNombreTabla(const std::string& sql) {
-    size_t inicioTabla = sql.find("TABLE");
-    if (inicioTabla == std::string::npos) return "";
-    size_t inicioNombre = inicioTabla + 5;
-    size_t finNombre = sql.find("(", inicioNombre);
-    size_t posAs = sql.find(" AS ", inicioNombre);
-    if (posAs != std::string::npos && posAs < finNombre) {
-        finNombre = posAs;
-    }
-    if (finNombre == std::string::npos) return "";
-    std::string nombre = sql.substr(inicioNombre, finNombre - inicioNombre);
-    return limpiarNombre(nombre);
-}
-
-// Para CREATE TABLE: extrae el bloque entre parentesis
-std::string QueryProcessor::extraerBloqueColumnas(const std::string& sql) {
-    size_t inicio = sql.find("(");
-    size_t fin = sql.rfind(")");
-    if (inicio == std::string::npos || fin == std::string::npos || fin <= inicio) {
-        return "";
-    }
-    return sql.substr(inicio + 1, fin - inicio - 1);
-}
-
-// Para CREATE TABLE: divide el bloque de columnas por comas
-std::vector<std::string> QueryProcessor::partirPorComas(const std::string& bloque) {
-    std::vector<std::string> partes;
-    std::string actual;
-    bool dentroParentesis = false;
-    for (char c : bloque) {
-        if (c == '(') dentroParentesis = true;
-        else if (c == ')') dentroParentesis = false;
-        if (c == ',' && !dentroParentesis) {
-            partes.push_back(limpiarNombre(actual));
-            actual = "";
-        }
-        else {
-            actual += c;
-        }
-    }
-    if (!actual.empty()) {
-        partes.push_back(limpiarNombre(actual));
-    }
-    return partes;
-}
-
-// Para CREATE TABLE: parsea el tipo de dato
-TipoColumna QueryProcessor::parsearTipo(const std::string& tipoTexto) {
-    if (tipoTexto.rfind("INTEGER", 0) == 0)  return TipoColumna::INTEGER;
-    if (tipoTexto.rfind("DOUBLE", 0) == 0)   return TipoColumna::DOUBLE;
-    if (tipoTexto.rfind("VARCHAR", 0) == 0)  return TipoColumna::VARCHAR;
-    if (tipoTexto.rfind("DATETIME", 0) == 0) return TipoColumna::DATETIME;
-    return TipoColumna::VARCHAR;
-}
-
-// Para CREATE TABLE: parsea una definicion de columna completa
-Columna QueryProcessor::parsearColumna(const std::string& texto) {
-    Columna col;
-    col.nullable = true;
-
-    size_t espacio = texto.find(" ");
-    if (espacio == std::string::npos) {
-        col.name = texto;
-        col.type = TipoColumna::VARCHAR;
-        col.size = 20;
-        return col;
-    }
-    col.name = texto.substr(0, espacio);
-
-    std::string tipoTexto = limpiarNombre(texto.substr(espacio + 1));
-    col.type = parsearTipo(tipoTexto);
-
-    if (col.type == TipoColumna::VARCHAR) {
-        size_t abre = tipoTexto.find("(");
-        size_t cierra = tipoTexto.find(")");
-        if (abre != std::string::npos && cierra != std::string::npos) {
-            std::string numero = tipoTexto.substr(abre + 1, cierra - abre - 1);
-            col.size = std::stoi(numero);
-        }
-        else {
-            col.size = 20;
-        }
-    }
-    else if (col.type == TipoColumna::INTEGER) {
-        col.size = 4;
-    }
-    else if (col.type == TipoColumna::DOUBLE) {
-        col.size = 8;
-    }
-    else if (col.type == TipoColumna::DATETIME) {
-        col.size = 19;
-    }
-
-    return col;
-}
-
-// Para INSERT: extrae el nombre de la tabla entre "INTO" y "VALUES"
-std::string QueryProcessor::extraerNombreTablaInsert(const std::string& sql) {
-    size_t inicioInto = sql.find("INTO");
-    if (inicioInto == std::string::npos) {
-        inicioInto = sql.find("into");
-        if (inicioInto == std::string::npos) return "";
-    }
-    size_t inicioNombre = inicioInto + 4;
-    while (inicioNombre < sql.size() && (sql[inicioNombre] == ' ' || sql[inicioNombre] == '\t')) inicioNombre++;
-    size_t finNombre = sql.find("VALUES", inicioNombre);
-    if (finNombre == std::string::npos) finNombre = sql.find("values", inicioNombre);
-    if (finNombre == std::string::npos) finNombre = sql.find("(", inicioNombre);
-    if (finNombre == std::string::npos) return "";
-    std::string nombre = sql.substr(inicioNombre, finNombre - inicioNombre);
-    return limpiarNombre(nombre);
-}
-
-// Para INSERT: extrae los valores entre parentesis
-std::vector<std::string> QueryProcessor::extraerValores(const std::string& sql) {
-    std::vector<std::string> valores;
-
-    size_t valuesPos = sql.find("VALUES");
-    if (valuesPos == std::string::npos) {
-        valuesPos = sql.find("values");
-        if (valuesPos == std::string::npos) {
-            std::cout << "DEBUG extraerValores: no se encontró 'VALUES'" << std::endl;
-            return valores;
-        }
-    }
-
-    size_t inicio = sql.find("(", valuesPos);
-    if (inicio == std::string::npos) {
-        std::cout << "DEBUG extraerValores: no se encontró '(' después de VALUES" << std::endl;
-        return valores;
-    }
-
-    size_t fin = sql.rfind(")");
-    if (fin == std::string::npos || fin <= inicio) {
-        std::cout << "DEBUG extraerValores: no se encontró ')' o está antes de '('" << std::endl;
-        return valores;
-    }
-
-    std::string bloque = sql.substr(inicio + 1, fin - inicio - 1);
-    std::cout << "DEBUG extraerValores: bloque extraído = '" << bloque << "'" << std::endl;
-
-    std::string actual;
-    bool dentroComillas = false;
-    for (char c : bloque) {
-        if (c == '"' || c == '\'') {
-            dentroComillas = !dentroComillas;
-            actual += c;
-        }
-        else if (c == ',' && !dentroComillas) {
-            std::string val = limpiarNombre(actual);
-            if (!val.empty() && (val.front() == '"' || val.front() == '\'')) val.erase(0, 1);
-            if (!val.empty() && (val.back() == '"' || val.back() == '\'')) val.pop_back();
-            valores.push_back(val);
-            actual = "";
-        }
-        else {
-            actual += c;
-        }
-    }
-    if (!actual.empty()) {
-        std::string val = limpiarNombre(actual);
-        if (!val.empty() && (val.front() == '"' || val.front() == '\'')) val.erase(0, 1);
-        if (!val.empty() && (val.back() == '"' || val.back() == '\'')) val.pop_back();
-        valores.push_back(val);
-    }
-
-    for (size_t i = 0; i < valores.size(); ++i) {
-        std::cout << "  valor[" << i << "] = '" << valores[i] << "'" << std::endl;
-    }
-
-    return valores;
-}
-
-// Para DROP TABLE: extrae el nombre de la tabla despues de "TABLE"
-std::string QueryProcessor::extraerNombreTablaDrop(const std::string& sql) {
-    size_t inicio = sql.find("TABLE");
-    if (inicio == std::string::npos) return "";
-    size_t inicioNombre = inicio + 5;
-    while (inicioNombre < sql.size() && (sql[inicioNombre] == ' ' || sql[inicioNombre] == '\t')) inicioNombre++;
-    std::string resto = sql.substr(inicioNombre);
-    size_t fin = resto.find_first_of(" \t;");
-    if (fin == std::string::npos) fin = resto.size();
-    std::string nombre = resto.substr(0, fin);
-    return limpiarNombre(nombre);
-}
-
-// ========== NUEVOS MÉTODOS PARA ÍNDICES ==========
-
-// Para CREATE INDEX: extrae el nombre del índice (después de "CREATE INDEX")
-std::string QueryProcessor::extraerNombreIndice(const std::string& sql) {
-    size_t inicio = sql.find("INDEX");
-    if (inicio == std::string::npos) return "";
-    size_t inicioNombre = inicio + 5;
-    while (inicioNombre < sql.size() && (sql[inicioNombre] == ' ' || sql[inicioNombre] == '\t')) inicioNombre++;
-    size_t finNombre = sql.find(" ON ", inicioNombre);
-    if (finNombre == std::string::npos) return "";
-    std::string nombre = sql.substr(inicioNombre, finNombre - inicioNombre);
-    return limpiarNombre(nombre);
-}
-
-// Para CREATE INDEX: extrae el nombre de la tabla (después de "ON")
-std::string QueryProcessor::extraerNombreTablaIndex(const std::string& sql) {
-    size_t onPos = sql.find("ON");
-    if (onPos == std::string::npos) return "";
-    size_t inicioNombre = onPos + 2;
-    while (inicioNombre < sql.size() && (sql[inicioNombre] == ' ' || sql[inicioNombre] == '\t')) inicioNombre++;
-    size_t finNombre = sql.find("(", inicioNombre);
-    if (finNombre == std::string::npos) return "";
-    std::string nombre = sql.substr(inicioNombre, finNombre - inicioNombre);
-    return limpiarNombre(nombre);
-}
-
-// Para CREATE INDEX: extrae el nombre de la columna (dentro de paréntesis después de la tabla)
-std::string QueryProcessor::extraerColumnaIndex(const std::string& sql) {
-    size_t inicio = sql.find("(");
-    if (inicio == std::string::npos) return "";
-    size_t fin = sql.find(")", inicio);
-    if (fin == std::string::npos) return "";
-    std::string columna = sql.substr(inicio + 1, fin - inicio - 1);
-    return limpiarNombre(columna);
-}
-
-// Para CREATE INDEX: extrae el tipo de árbol (después de "OF TYPE")
-std::string QueryProcessor::extraerTipoArbol(const std::string& sql) {
-    // Buscar "OF TYPE" en la cadena original (puede estar en mayúsculas o minúsculas)
-    std::string upper = sql;
-    for (auto& c : upper) c = toupper(c);
-    size_t ofPos = upper.find("OF TYPE");
-    if (ofPos == std::string::npos) {
-        // También podría ser solo "TYPE" según el formato, pero el PDF dice "OF TYPE"
-        return "";
-    }
-    size_t inicioTipo = ofPos + 7; // longitud de "OF TYPE"
-    while (inicioTipo < sql.size() && (sql[inicioTipo] == ' ' || sql[inicioTipo] == '\t')) inicioTipo++;
-    // El tipo termina al final de la línea o con punto y coma
-    size_t finTipo = sql.find_first_of(" \t;", inicioTipo);
-    if (finTipo == std::string::npos) finTipo = sql.size();
-    std::string tipo = sql.substr(inicioTipo, finTipo - inicioTipo);
-    return limpiarNombre(tipo);
 }
