@@ -8,11 +8,17 @@
 #include "Types.h"
 #include "Index.h"
 
+// Ruta base donde se guardan las bases de datos. Se define una sola vez en
+// StoredDataManager.cpp y se comparte con los demas archivos de la clase.
+extern const std::string DATA_DIR;
+
+// Capa de acceso a disco. Lee y escribe los archivos binarios de las tablas
+// y mantiene los indices en memoria.
 class StoredDataManager {
 public:
     StoredDataManager();
 
-    // DDL
+    // Operaciones sobre bases de datos y tablas (DDL)
     QueryResult crearBaseDatos(const std::string& nombre);
     QueryResult eliminarBaseDatos(const std::string& nombre);
     bool existeBaseDatos(const std::string& nombre) const;
@@ -22,14 +28,14 @@ public:
     QueryResult eliminarTabla(const std::string& dbName,
         const std::string& tableName);
 
-    // Índices
+    // Creacion de indices (BST o BTREE) sobre una columna
     QueryResult crearIndice(const std::string& dbName,
         const std::string& tableName,
         const std::string& indexName,
         const std::string& columnName,
-        const std::string& tipoArbol); // "BST" o "BTREE"
+        const std::string& tipoArbol);
 
-    // DML
+    // Operaciones sobre las filas (DML)
     QueryResult insertarFila(const std::string& dbName,
         const std::string& tableName,
         const std::vector<std::string>& valores);
@@ -57,18 +63,23 @@ public:
         const std::string& whereValue);
 
 private:
+    // Nombres de las bases de datos existentes
     std::set<std::string> databases;
-    // Índices en memoria: clave = "db/table/indexName"
+    // Indices en memoria. Clave: "db/tabla/nombreIndice"
     std::unordered_map<std::string, std::unique_ptr<Index>> indices;
-    // Mapa auxiliar para buscar índice por columna: clave = "db/table/column"
+    // Acceso rapido al indice por columna. Clave: "db/tabla/columna"
     std::unordered_map<std::string, Index*> indicePorColumna;
 
     void cargarBasesDeDatos();
     void cargarIndices();
     bool esFechaValida(const std::string& fecha);
 
-    Index* obtenerIndice(const std::string& dbName, const std::string& tableName, const std::string& columnName) const;
+    Index* obtenerIndice(const std::string& dbName,
+        const std::string& tableName,
+        const std::string& columnName) const;
 
+    // Lee todas las filas de una tabla con el offset (posicion en bytes) de cada
+    // una. El offset es lo que guardan los indices para llegar directo a la fila.
     std::vector<std::pair<std::vector<std::string>, size_t>>
         leerFilasConOffset(const std::string& dbName,
             const std::string& tableName);

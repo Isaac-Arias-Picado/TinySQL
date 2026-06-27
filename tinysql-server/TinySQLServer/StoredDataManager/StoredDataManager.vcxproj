@@ -152,6 +152,9 @@
     <ClCompile Include="BTreeIndex.cpp" />
     <ClCompile Include="Cifrado.cpp" />
     <ClCompile Include="StoredDataManager.cpp" />
+    <ClCompile Include="StoredDataManager_DDL.cpp" />
+    <ClCompile Include="StoredDataManager_DML.cpp" />
+    <ClCompile Include="StoredDataManager_Index.cpp" />
     <ClCompile Include="SystemCatalog.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
